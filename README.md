@@ -73,9 +73,15 @@ A share of the revenue helps fund the development of Navidrome at no additional 
 
 Navidrome supports LDAP authentication, allowing you to integrate with your existing directory services. When a user logs in via LDAP, their account is automatically created in Navidrome if it doesn't exist. Passwords are synced to the local database on successful login, enabling token-based authentication for Subsonic clients.
 
+### TODO
+
+- [ ] Add the ability to auto-assign admins using an LDAP group
+- [ ] Add a type flag to the user persistence with migrations
+- [ ] Update UI to disable password editing if the user type is LDAP
+
 ### Docker Container
 
-To use LDAP features, you must use the fork's Docker image:
+To use LDAP features, you must use [the fork's Docker image](https://github.com/joestump/navidrome-ldap/pkgs/container/navidrome-ldap):
 
 `ghcr.io/joestump/navidrome-ldap:develop`
 
