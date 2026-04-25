@@ -110,6 +110,7 @@ type configOptions struct {
 	PID                             pidOptions          `json:",omitzero"`
 	Inspect                         inspectOptions      `json:",omitzero"`
 	Subsonic                        subsonicOptions     `json:",omitzero"`
+	LDAP                            ldapOptions         `json:",omitzero"`
 	LastFM                          lastfmOptions       `json:",omitzero"`
 	Deezer                          deezerOptions       `json:",omitzero"`
 	ListenBrainz                    listenBrainzOptions `json:",omitzero"`
@@ -169,6 +170,16 @@ type subsonicOptions struct {
 	EnableAverageRating   bool
 	LegacyClients         string
 	MinimalClients        string
+}
+
+type ldapOptions struct {
+	Host         string
+	BindDN       string
+	BindPassword string
+	Base         string
+	SearchFilter string
+	Mail         string
+	Name         string
 }
 
 type TagConf struct {
@@ -827,6 +838,13 @@ func setViperDefaults() {
 	viper.SetDefault("listenbrainz.baseurl", consts.DefaultListenBrainzBaseURL)
 	viper.SetDefault("listenbrainz.artistalgorithm", consts.DefaultListenBrainzArtistAlgorithm)
 	viper.SetDefault("listenbrainz.trackalgorithm", consts.DefaultListenBrainzTrackAlgorithm)
+	viper.SetDefault("ldap.host", "")
+	viper.SetDefault("ldap.binddn", "")
+	viper.SetDefault("ldap.bindpassword", "")
+	viper.SetDefault("ldap.base", "")
+	viper.SetDefault("ldap.searchfilter", "(&(objectClass=inetOrgPerson)(uid=%s))")
+	viper.SetDefault("ldap.mail", "mail")
+	viper.SetDefault("ldap.name", "cn")
 	viper.SetDefault("enablescrobblehistory", true)
 	viper.SetDefault("httpheaders.frameoptions", "DENY")
 	viper.SetDefault("backup.path", "")
