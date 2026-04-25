@@ -1,3 +1,11 @@
+> [!IMPORTANT]
+> This is a soft fork of Navidrome that adds LDAP support. It is based on [this previously closed PR](https://github.com/navidrome/navidrome/pull/590).
+> Based on the thread in the original PR, it is unlikely this would be accepted upstream, but I wanted to use LLDAP with Navidrome so here we are. 
+
+> [!WARNING]
+> **Notice of AI/LLM usage in code.** While I am a reasonably competent Go programmer, I do not have the time nor desire to dig into this codebase deeply.
+> As such, I've used Gemini 3.0 Pro and Zed to handle the heavy lifting. I review all code prior to merging into the main branch.
+
 <a href="https://www.navidrome.org"><img src="resources/logo-192x192.png" alt="Navidrome logo" title="navidrome" align="right" height="60px" /></a>
 
 # Navidrome Music Server &nbsp;[![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social)](https://twitter.com/intent/tweet?text=Tired%20of%20paying%20for%20music%20subscriptions%2C%20and%20not%20finding%20what%20you%20really%20like%3F%20Roll%20your%20own%20streaming%20service%21&url=https://navidrome.org&via=navidrome)
@@ -48,6 +56,7 @@ A share of the revenue helps fund the development of Navidrome at no additional 
  - Reads and uses all your beautifully curated **metadata**
  - Great support for **compilations** (Various Artists albums) and **box sets** (multi-disc albums)
  - **Multi-user**, each user has their own play counts, playlists, favourites, etc...
+ - **LDAP** support allows users to authenticate against LDAP servers for SSO
  - Very **low resource usage**
  - **Multi-platform**, runs on macOS, Linux and Windows. **Docker** images are also provided
  - Ready to use binaries for all major platforms, including **Raspberry Pi**
@@ -56,6 +65,39 @@ A share of the revenue helps fund the development of Navidrome at no additional 
  - **Compatible** with all Subsonic/Madsonic/Airsonic [clients](https://www.navidrome.org/docs/overview/#apps)
  - **Transcoding** on the fly. Can be set per user/player. **Opus encoding is supported**
  - Translated to **various languages**
+
+## LDAP Support
+
+> [!WARNING]
+> LDAP support is currently unofficial and NOT supported by the Navidrome team. Please use at your own risk.
+
+Navidrome supports LDAP authentication, allowing you to integrate with your existing directory services. When a user logs in via LDAP, their account is automatically created in Navidrome if it doesn't exist. Passwords are synced to the local database on successful login, enabling token-based authentication for Subsonic clients.
+
+### TODO
+
+- [ ] Add the ability to auto-assign admins using an LDAP group
+- [ ] Add a type flag to the user persistence with migrations
+- [ ] Update UI to disable password editing if the user type is LDAP
+
+### Docker Container
+
+To use LDAP features, you must use [the fork's Docker image](https://github.com/joestump/navidrome-ldap/pkgs/container/navidrome-ldap):
+
+`ghcr.io/joestump/navidrome-ldap:develop`
+
+### Configuration
+
+You can configure LDAP using the following environment variables:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ND_LDAP_HOST` | The LDAP server URL | `ldap://localhost:389` |
+| `ND_LDAP_BINDDN` | The DN used to bind for searching users | `cn=admin,dc=example,dc=org` |
+| `ND_LDAP_BINDPASSWORD` | The password for the Bind DN | `admin_password` |
+| `ND_LDAP_BASE` | The base DN for user search | `ou=users,dc=example,dc=org` |
+| `ND_LDAP_SEARCHFILTER` | The filter to search for users. `%s` is replaced by the username | `(uid=%s)` |
+| `ND_LDAP_NAME` | The LDAP attribute to map to the user's full name | `cn` |
+| `ND_LDAP_MAIL` | The LDAP attribute to map to the user's email | `mail` |
 
 ## Translations
 
