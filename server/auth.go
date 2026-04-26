@@ -181,26 +181,24 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 		return nil, nil
 	}
 
-	binduserdn := conf.Server.LDAP.BindDN
-	bindpassword := conf.Server.LDAP.BindPassword
+	bindDN := conf.Server.LDAP.BindDN
+	bindPassword := conf.Server.LDAP.BindPassword
 	mailAttr := conf.Server.LDAP.Mail
 	nameAttr := conf.Server.LDAP.Name
 
 	l, err := ldap.DialURL(conf.Server.LDAP.Host)
 	if err != nil {
-		log.Error(err)
+		log.Error("LDAP connection failed", "host", conf.Server.LDAP.Host, err)
 		return nil, nil
 	}
 	defer l.Close()
 
-	// First bind with a read only user
-	err = l.Bind(binduserdn, bindpassword)
-	if err != nil {
-		log.Error(err)
+	// Bind with the read-only service account to search for the user
+	if err := l.Bind(bindDN, bindPassword); err != nil {
+		log.Error("LDAP service-account bind failed", "bindDN", bindDN, err)
 		return nil, nil
 	}
 
-	// Search for the given username
 	searchRequest := ldap.NewSearchRequest(
 		conf.Server.LDAP.Base,
 		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
@@ -208,58 +206,40 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 		[]string{"dn", nameAttr, mailAttr},
 		nil,
 	)
-
 	sr, err := l.Search(searchRequest)
 	if err != nil {
-		log.Error(err)
+		log.Error("LDAP search failed", "user", userName, err)
 		return nil, nil
 	}
-
 	if len(sr.Entries) != 1 {
-		log.Error("User does not exist or too many entries returned")
+		log.Warn("LDAP search returned unexpected number of entries", "user", userName, "matches", len(sr.Entries))
 		return nil, nil
 	}
 
-	dn := sr.Entries[0].DN
-	mail := sr.Entries[0].GetAttributeValue(mailAttr)
-	name := sr.Entries[0].GetAttributeValue(nameAttr)
-
-	authenticated := true
-	// Bind as the user to verify their password
-	err = l.Bind(dn, password)
-
-	if err != nil {
-		log.Error(err)
-		authenticated = false
-	}
-
-	// Rebind as the read only user for any further queries
-	err = l.Bind(binduserdn, bindpassword)
-	if err != nil {
-		log.Error(err)
-	}
-
-	if !authenticated {
+	entry := sr.Entries[0]
+	// Re-bind as the user to verify their password
+	if err := l.Bind(entry.DN, password); err != nil {
+		log.Warn("LDAP user authentication failed", "user", userName, err)
 		return nil, nil
 	}
 
+	// User authenticated; sync to local DB so Subsonic clients can use token auth
 	u, err := userRepo.FindByUsername(userName)
 	if errors.Is(err, model.ErrNotFound) {
 		u = &model.User{UserName: userName}
+	} else if err != nil {
+		log.Error("Could not look up LDAP user in DB", "user", userName, err)
+		return nil, nil
 	}
-	u.Name = name
-	u.Email = mail
-	u.Password = password
+	u.Name = entry.GetAttributeValue(nameAttr)
+	u.Email = entry.GetAttributeValue(mailAttr)
 	u.NewPassword = password
-	u.CurrentPassword = password
-	err = userRepo.Put(u)
-	if err != nil {
-		log.Error("Could not update User", "user", userName, err)
+	if err := userRepo.Put(u); err != nil {
+		log.Error("Could not save LDAP user", "user", userName, err)
+		return nil, nil
 	}
-
-	err = userRepo.UpdateLastLoginAt(u.ID)
-	if err != nil {
-		log.Error("Could not update LastLoginAt", "user", userName)
+	if err := userRepo.UpdateLastLoginAt(u.ID); err != nil {
+		log.Error("Could not update LastLoginAt", "user", userName, err)
 	}
 
 	return u, nil
