@@ -4,7 +4,7 @@
 
 > [!WARNING]
 > **Notice of AI/LLM usage in code.** While I am a reasonably competent Go programmer, I do not have the time nor desire to dig into this codebase deeply.
-> As such, I've used Gemini 3.0 Pro and Zed to handle the heavy lifting. I review all code prior to merging into the main branch.
+> As such, I use [Claude Code](https://claude.com/claude-code) to handle the heavy lifting — including rebasing this fork against upstream Navidrome. I review all code prior to merging into the main branch.
 
 <a href="https://www.navidrome.org"><img src="resources/logo-192x192.png" alt="Navidrome logo" title="navidrome" align="right" height="60px" /></a>
 
