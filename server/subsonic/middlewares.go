@@ -157,6 +157,24 @@ func authenticate(ds model.DataStore) func(next http.Handler) http.Handler {
 						}
 					}
 				}
+
+				// App-password fallback. If the regular credential check
+				// failed, try matching the presented credentials against the
+				// user's active app passwords. App passwords are per-device,
+				// revocable secrets independent of the user's main password
+				// (LDAP or local). Only password and salt+token auth are
+				// considered; JWT auth carries its own user identity, and
+				// internal/reverse-proxy auth bypasses the credential check
+				// entirely.
+				if err != nil && jwt == "" && (pass != "" || token != "") {
+					if appUsr, appID, ok := matchAppPassword(ctx, ds, username, pass, token, salt); ok {
+						usr = appUsr
+						err = nil
+						if touchErr := ds.AppPassword(ctx).Touch(appID); touchErr != nil {
+							log.Warn(ctx, "API: Failed to bump app password last_used_at", "id", appID, "username", username, touchErr)
+						}
+					}
+				}
 			}
 
 			if err != nil {
@@ -193,6 +211,40 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 		return model.ErrInvalidAuth
 	}
 	return nil
+}
+
+// matchAppPassword tries to authenticate the request against the user's
+// active app passwords. Returns the user, the matched app password ID, and
+// true on success. The caller is responsible for bumping last_used_at on
+// the returned ID. The user is looked up fresh because the prior auth path
+// may have failed before populating it.
+func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, token, salt string) (*model.User, string, bool) {
+	if username == "" {
+		return nil, "", false
+	}
+	usr, err := ds.User(ctx).FindByUsername(username)
+	if err != nil {
+		return nil, "", false
+	}
+	active, err := ds.AppPassword(ctx).FindActiveByUser(usr.ID)
+	if err != nil {
+		log.Warn(ctx, "API: Error loading app passwords", "username", username, err)
+		return nil, "", false
+	}
+	if strings.HasPrefix(pass, "enc:") {
+		if dec, decErr := hex.DecodeString(pass[4:]); decErr == nil {
+			pass = string(dec)
+		}
+	}
+	for _, ap := range active {
+		switch {
+		case pass != "" && pass == ap.Password:
+			return usr, ap.ID, true
+		case token != "" && fmt.Sprintf("%x", md5.Sum([]byte(ap.Password+salt))) == token:
+			return usr, ap.ID, true
+		}
+	}
+	return nil, "", false
 }
 
 func getPlayer(players core.Players) func(next http.Handler) http.Handler {

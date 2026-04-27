@@ -155,7 +155,12 @@
         "currentPassword": "Current Password",
         "newPassword": "New Password",
         "token": "Token",
-        "libraries": "Libraries"
+        "libraries": "Libraries",
+        "appPasswords": "App Passwords",
+        "appPasswordName": "Name",
+        "appPasswordCreatedAt": "Created",
+        "appPasswordLastUsedAt": "Last Used",
+        "appPasswordStatus": "Status"
       },
       "helperTexts": {
         "name": "Changes to your name will only be reflected on next login",
@@ -164,7 +169,17 @@
       "notifications": {
         "created": "User created",
         "updated": "User updated",
-        "deleted": "User deleted"
+        "deleted": "User deleted",
+        "appPasswordRevoked": "App password revoked",
+        "appPasswordRevokeError": "Could not revoke app password",
+        "appPasswordCreateError": "Could not create app password",
+        "appPasswordLoadError": "Could not load app passwords",
+        "appPasswordCopied": "Copied to clipboard"
+      },
+      "actions": {
+        "generateAppPassword": "Generate App Password",
+        "revokeAppPassword": "Revoke",
+        "copyAppPassword": "Copy"
       },
       "validation": {
         "librariesRequired": "At least one library must be selected for non-admin users"
@@ -173,7 +188,13 @@
         "listenBrainzToken": "Enter your ListenBrainz user token.",
         "clickHereForToken": "Click here to get your token",
         "selectAllLibraries": "Select all libraries",
-        "adminAutoLibraries": "Admin users automatically have access to all libraries"
+        "adminAutoLibraries": "Admin users automatically have access to all libraries",
+        "appPasswordsEmpty": "No app passwords yet. Generate one to use with Subsonic-compatible clients.",
+        "appPasswordCreatePrompt": "Give this app password a name so you remember which device or app it's for.",
+        "appPasswordCreated": "App password created",
+        "appPasswordOneTime": "Save this secret now — it will not be shown again. Paste it into your Subsonic client in place of your account password.",
+        "appPasswordActive": "Active",
+        "appPasswordRevoked": "Revoked"
       }
     },
     "player": {
