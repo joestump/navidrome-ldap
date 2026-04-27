@@ -182,20 +182,21 @@ var _ = Describe("App Password Subsonic Auth", func() {
 
 	// Regression for the single-decode invariant. The parent flow decodes
 	// `p=enc:<hex>` once into plaintext; matchAppPassword must not decode
-	// again. A secret whose plaintext literally starts with `enc:` followed
-	// by hex would otherwise be mishandled by a double-decode.
+	// again. A password whose plaintext literally starts with `enc:`
+	// followed by hex would otherwise be mishandled by a double-decode.
 	It("matches an app password whose plaintext starts with `enc:`", func() {
-		const trickySecret = "enc:6162" // plaintext, not hex-encoded
+		// Plaintext that looks like an `enc:`-encoded value but isn't.
+		const trickyPlaintext = "enc:6162"
 		Expect(ds.AppPassword(context.TODO()).Put(&model.AppPassword{
 			UserID:      userID,
 			Name:        "tricky",
-			NewPassword: trickySecret,
+			NewPassword: trickyPlaintext,
 		})).To(Succeed())
 
 		// hex-encode the literal string "enc:6162" so the parent flow
 		// decodes it once into the plaintext. A buggy double-decode would
 		// take the decoded "enc:6162" and decode again to "ab".
-		hexEncoded := fmt.Sprintf("%x", []byte(trickySecret))
+		hexEncoded := fmt.Sprintf("%x", []byte(trickyPlaintext))
 		r := newGetRequest("u="+username, "p=enc:"+hexEncoded)
 		authenticate(ds)(nextHandler).ServeHTTP(w, r)
 
