@@ -147,7 +147,14 @@ func (r *appPasswordRepository) RevokeAllForUser(userID string) (int64, error) {
 }
 
 func (r *appPasswordRepository) Touch(idVal string) error {
-	upd := Update(r.tableName).Where(Eq{"id": idVal}).Set("last_used_at", time.Now())
+	// Filter on revoked_at to avoid bumping last_used_at on a revoked row
+	// under a TOCTOU race (a request mid-auth completing after another
+	// request revokes the same app password). Misleading audit data
+	// otherwise.
+	upd := Update(r.tableName).
+		Where(Eq{"id": idVal}).
+		Where(Eq{"revoked_at": nil}).
+		Set("last_used_at", time.Now())
 	_, err := r.executeSQL(upd)
 	return err
 }

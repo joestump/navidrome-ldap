@@ -137,6 +137,10 @@ func (m *MockedAppPasswordRepo) Touch(id string) error {
 	if !ok {
 		return model.ErrNotFound
 	}
+	if ap.RevokedAt != nil {
+		// Mirror the real repo: don't bump last_used_at on revoked rows.
+		return nil
+	}
 	ap.LastUsedAt = gg.P(time.Now())
 	return nil
 }

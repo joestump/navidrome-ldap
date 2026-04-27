@@ -173,5 +173,17 @@ var _ = Describe("AppPasswordRepository", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(after.LastUsedAt).ToNot(BeNil())
 		})
+
+		It("does not bump last_used_at on a revoked password (TOCTOU guard)", func() {
+			ap := &model.AppPassword{UserID: owner.ID, Name: "revoked-touch", NewPassword: "x"}
+			Expect(repo.Put(ap)).To(Succeed())
+			Expect(repo.Revoke(ap.ID)).To(Succeed())
+
+			Expect(repo.Touch(ap.ID)).To(Succeed())
+
+			after, err := repo.Get(ap.ID)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(after.LastUsedAt).To(BeNil())
+		})
 	})
 })

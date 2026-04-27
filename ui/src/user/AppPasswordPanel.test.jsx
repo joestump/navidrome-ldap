@@ -25,11 +25,10 @@ vi.mock('@material-ui/core/styles', () => ({
 }))
 
 vi.mock('@material-ui/core', () => {
-  const passthrough = (tag, testIdProp) =>
-    React.forwardRef(({ children, ...props }, ref) => {
-      const { ...rest } = props
-      const testId = testIdProp ? rest[testIdProp] : undefined
-      const cleaned = { ...rest }
+  const passthrough = (tag, displayName) => {
+    const Component = React.forwardRef(({ children, ...props }, ref) => {
+      const cleaned = { ...props }
+      // Strip Material-UI-only props that don't belong on plain DOM nodes.
       delete cleaned.classes
       delete cleaned.elevation
       delete cleaned.variant
@@ -41,12 +40,11 @@ vi.mock('@material-ui/core', () => {
       delete cleaned.margin
       delete cleaned.InputProps
       delete cleaned.multiline
-      return React.createElement(
-        tag,
-        { ref, ...cleaned, 'data-testid': testId },
-        children,
-      )
+      return React.createElement(tag, { ref, ...cleaned }, children)
     })
+    Component.displayName = displayName
+    return Component
+  }
 
   const Button = React.forwardRef(({ children, onClick, disabled }, ref) =>
     React.createElement(
@@ -60,6 +58,8 @@ vi.mock('@material-ui/core', () => {
       children,
     ),
   )
+  Button.displayName = 'MockButton'
+
   const TextField = React.forwardRef(
     ({ value, onChange, onFocus, label }, ref) =>
       React.createElement('input', {
@@ -71,41 +71,56 @@ vi.mock('@material-ui/core', () => {
         readOnly: false,
       }),
   )
+  TextField.displayName = 'MockTextField'
+
+  const Tooltip = ({ children }) => children
+  Tooltip.displayName = 'MockTooltip'
+
+  const IconButton = ({ onClick, children }) =>
+    React.createElement(
+      'button',
+      { onClick, 'data-testid': 'icon-button' },
+      children,
+    )
+  IconButton.displayName = 'MockIconButton'
+
+  const Dialog = ({ open, children }) =>
+    open
+      ? React.createElement('div', { 'data-testid': 'dialog' }, children)
+      : null
+  Dialog.displayName = 'MockDialog'
+
   return {
-    Box: passthrough('div'),
-    Paper: passthrough('div'),
-    Table: passthrough('table'),
-    TableBody: passthrough('tbody'),
-    TableCell: passthrough('td'),
-    TableHead: passthrough('thead'),
-    TableRow: passthrough('tr'),
-    Typography: passthrough('div'),
-    Tooltip: ({ children }) => children,
-    IconButton: ({ onClick, children }) =>
-      React.createElement(
-        'button',
-        { onClick, 'data-testid': 'icon-button' },
-        children,
-      ),
-    Dialog: ({ open, children }) =>
-      open
-        ? React.createElement('div', { 'data-testid': 'dialog' }, children)
-        : null,
-    DialogTitle: passthrough('h2'),
-    DialogContent: passthrough('div'),
-    DialogContentText: passthrough('p'),
-    DialogActions: passthrough('div'),
+    Box: passthrough('div', 'MockBox'),
+    Paper: passthrough('div', 'MockPaper'),
+    Table: passthrough('table', 'MockTable'),
+    TableBody: passthrough('tbody', 'MockTableBody'),
+    TableCell: passthrough('td', 'MockTableCell'),
+    TableHead: passthrough('thead', 'MockTableHead'),
+    TableRow: passthrough('tr', 'MockTableRow'),
+    Typography: passthrough('div', 'MockTypography'),
+    Tooltip,
+    IconButton,
+    Dialog,
+    DialogTitle: passthrough('h2', 'MockDialogTitle'),
+    DialogContent: passthrough('div', 'MockDialogContent'),
+    DialogContentText: passthrough('p', 'MockDialogContentText'),
+    DialogActions: passthrough('div', 'MockDialogActions'),
     Button,
     TextField,
   }
 })
 
-vi.mock('@material-ui/icons/DeleteOutline', () => ({
-  default: () => React.createElement('span', null, 'del'),
-}))
-vi.mock('@material-ui/icons/FileCopy', () => ({
-  default: () => React.createElement('span', null, 'cp'),
-}))
+vi.mock('@material-ui/icons/DeleteOutline', () => {
+  const MockDeleteOutlineIcon = () => React.createElement('span', null, 'del')
+  MockDeleteOutlineIcon.displayName = 'MockDeleteOutlineIcon'
+  return { default: MockDeleteOutlineIcon }
+})
+vi.mock('@material-ui/icons/FileCopy', () => {
+  const MockFileCopyIcon = () => React.createElement('span', null, 'cp')
+  MockFileCopyIcon.displayName = 'MockFileCopyIcon'
+  return { default: MockFileCopyIcon }
+})
 
 vi.mock('../consts', () => ({
   REST_URL: '/api',

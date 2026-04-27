@@ -162,4 +162,43 @@ var _ = Describe("App Password Subsonic Auth", func() {
 		Expect(all).To(HaveLen(1))
 		Expect(all[0].LastUsedAt).ToNot(BeNil())
 	})
+
+	// Regression: app-password auth must short-circuit BEFORE
+	// `server.ValidateLogin` is called. ValidateLogin attempts a real LDAP
+	// bind and, on success, bumps LastLoginAt. If app-password auth runs
+	// before ValidateLogin (the intended order), neither LDAP nor
+	// LastLoginAt is touched.
+	It("does not bump LastLoginAt when authenticating via app password (LDAP-skip)", func() {
+		r := newGetRequest("u="+username, "p="+appSecret)
+		authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+		Expect(nextHandler.called).To(BeTrue())
+		usr, err := ds.User(context.TODO()).FindByUsername(username)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(usr.LastLoginAt).To(BeNil(),
+			"LastLoginAt should not be set — that would mean ValidateLogin "+
+				"ran, which means LDAP would have been queried")
+	})
+
+	// Regression for the single-decode invariant. The parent flow decodes
+	// `p=enc:<hex>` once into plaintext; matchAppPassword must not decode
+	// again. A secret whose plaintext literally starts with `enc:` followed
+	// by hex would otherwise be mishandled by a double-decode.
+	It("matches an app password whose plaintext starts with `enc:`", func() {
+		const trickySecret = "enc:6162" // plaintext, not hex-encoded
+		Expect(ds.AppPassword(context.TODO()).Put(&model.AppPassword{
+			UserID:      userID,
+			Name:        "tricky",
+			NewPassword: trickySecret,
+		})).To(Succeed())
+
+		// hex-encode the literal string "enc:6162" so the parent flow
+		// decodes it once into the plaintext. A buggy double-decode would
+		// take the decoded "enc:6162" and decode again to "ab".
+		hexEncoded := fmt.Sprintf("%x", []byte(trickySecret))
+		r := newGetRequest("u="+username, "p=enc:"+hexEncoded)
+		authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+		Expect(nextHandler.called).To(BeTrue())
+	})
 })

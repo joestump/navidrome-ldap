@@ -131,6 +131,25 @@ func authenticate(ds model.DataStore) func(next http.Handler) http.Handler {
 				salt, _ := p.String("s")
 				jwt, _ := p.String("jwt")
 
+				// App-password fast path. When the request carries a `p` or
+				// salt+token, try matching against the user's active app
+				// passwords FIRST. This avoids hitting LDAP on every Subsonic
+				// request from a client using an app password — which is the
+				// whole point of decoupling Subsonic auth from the directory.
+				// LDAP deployments with lockout policies (AD lockoutThreshold,
+				// FreeIPA password policy) would otherwise lock the user's
+				// directory account on every legitimate app-password request.
+				if jwt == "" && (pass != "" || token != "") {
+					if appUsr, appID, ok := matchAppPassword(ctx, ds, username, pass, token, salt); ok {
+						if touchErr := ds.AppPassword(ctx).Touch(appID); touchErr != nil {
+							log.Warn(ctx, "API: Failed to bump app password last_used_at", "id", appID, "username", username, touchErr)
+						}
+						ctx = request.WithUser(ctx, *appUsr)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+				}
+
 				if pass != "" {
 					usr, err = server.ValidateLogin(ds.User(ctx), username, pass)
 					if err == nil && usr == nil {
@@ -154,24 +173,6 @@ func authenticate(ds model.DataStore) func(next http.Handler) http.Handler {
 						err = validateCredentials(usr, pass, token, salt, jwt)
 						if err != nil {
 							log.Warn(ctx, "API: Invalid login", "auth", "subsonic", "username", username, "remoteAddr", r.RemoteAddr, err)
-						}
-					}
-				}
-
-				// App-password fallback. If the regular credential check
-				// failed, try matching the presented credentials against the
-				// user's active app passwords. App passwords are per-device,
-				// revocable secrets independent of the user's main password
-				// (LDAP or local). Only password and salt+token auth are
-				// considered; JWT auth carries its own user identity, and
-				// internal/reverse-proxy auth bypasses the credential check
-				// entirely.
-				if err != nil && jwt == "" && (pass != "" || token != "") {
-					if appUsr, appID, ok := matchAppPassword(ctx, ds, username, pass, token, salt); ok {
-						usr = appUsr
-						err = nil
-						if touchErr := ds.AppPassword(ctx).Touch(appID); touchErr != nil {
-							log.Warn(ctx, "API: Failed to bump app password last_used_at", "id", appID, "username", username, touchErr)
 						}
 					}
 				}
@@ -216,8 +217,8 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 // matchAppPassword tries to authenticate the request against the user's
 // active app passwords. Returns the user, the matched app password ID, and
 // true on success. The caller is responsible for bumping last_used_at on
-// the returned ID. The user is looked up fresh because the prior auth path
-// may have failed before populating it.
+// the returned ID. `pass` MUST already be the decoded plaintext (the parent
+// `authenticate` flow handles `enc:` decoding once); we do not decode again.
 func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, token, salt string) (*model.User, string, bool) {
 	if username == "" {
 		return nil, "", false
@@ -230,11 +231,6 @@ func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, t
 	if err != nil {
 		log.Warn(ctx, "API: Error loading app passwords", "username", username, err)
 		return nil, "", false
-	}
-	if strings.HasPrefix(pass, "enc:") {
-		if dec, decErr := hex.DecodeString(pass[4:]); decErr == nil {
-			pass = string(dec)
-		}
 	}
 	for _, ap := range active {
 		switch {
