@@ -131,6 +131,25 @@ func authenticate(ds model.DataStore) func(next http.Handler) http.Handler {
 				salt, _ := p.String("s")
 				jwt, _ := p.String("jwt")
 
+				// App-password fast path. When the request carries a `p` or
+				// salt+token, try matching against the user's active app
+				// passwords FIRST. This avoids hitting LDAP on every Subsonic
+				// request from a client using an app password — which is the
+				// whole point of decoupling Subsonic auth from the directory.
+				// LDAP deployments with lockout policies (AD lockoutThreshold,
+				// FreeIPA password policy) would otherwise lock the user's
+				// directory account on every legitimate app-password request.
+				if jwt == "" && (pass != "" || token != "") {
+					if appUsr, appID, ok := matchAppPassword(ctx, ds, username, pass, token, salt); ok {
+						if touchErr := ds.AppPassword(ctx).Touch(appID); touchErr != nil {
+							log.Warn(ctx, "API: Failed to bump app password last_used_at", "id", appID, "username", username, touchErr)
+						}
+						ctx = request.WithUser(ctx, *appUsr)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+				}
+
 				if pass != "" {
 					usr, err = server.ValidateLogin(ds.User(ctx), username, pass)
 					if err == nil && usr == nil {
@@ -193,6 +212,35 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 		return model.ErrInvalidAuth
 	}
 	return nil
+}
+
+// matchAppPassword tries to authenticate the request against the user's
+// active app passwords. Returns the user, the matched app password ID, and
+// true on success. The caller is responsible for bumping last_used_at on
+// the returned ID. `pass` MUST already be the decoded plaintext (the parent
+// `authenticate` flow handles `enc:` decoding once); we do not decode again.
+func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, token, salt string) (*model.User, string, bool) {
+	if username == "" {
+		return nil, "", false
+	}
+	usr, err := ds.User(ctx).FindByUsername(username)
+	if err != nil {
+		return nil, "", false
+	}
+	active, err := ds.AppPassword(ctx).FindActiveByUser(usr.ID)
+	if err != nil {
+		log.Warn(ctx, "API: Error loading app passwords", "username", username, err)
+		return nil, "", false
+	}
+	for _, ap := range active {
+		switch {
+		case pass != "" && pass == ap.Password:
+			return usr, ap.ID, true
+		case token != "" && fmt.Sprintf("%x", md5.Sum([]byte(ap.Password+salt))) == token:
+			return usr, ap.ID, true
+		}
+	}
+	return nil, "", false
 }
 
 func getPlayer(players core.Players) func(next http.Handler) http.Handler {

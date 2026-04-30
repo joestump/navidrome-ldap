@@ -66,6 +66,10 @@ vi.mock('./LibrarySelectionField.jsx', () => ({
   LibrarySelectionField: () => <div data-testid="library-selection-field" />,
 }))
 
+vi.mock('./AppPasswordPanel.jsx', () => ({
+  AppPasswordPanel: () => <div data-testid="app-password-panel" />,
+}))
+
 vi.mock('./DeleteUserButton', () => ({
   __esModule: true,
   default: () => <button data-testid="delete-user-button">Delete</button>,

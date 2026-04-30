@@ -17,6 +17,7 @@ type MockDataStore struct {
 	MockedMediaFile      model.MediaFileRepository
 	MockedTag            model.TagRepository
 	MockedUser           model.UserRepository
+	MockedAppPassword    model.AppPasswordRepository
 	MockedProperty       model.PropertyRepository
 	MockedPlayer         model.PlayerRepository
 	MockedPlaylist       model.PlaylistRepository
@@ -178,6 +179,17 @@ func (db *MockDataStore) User(ctx context.Context) model.UserRepository {
 	}
 	db.MockedUser = CreateMockUserRepo()
 	return db.MockedUser
+}
+
+func (db *MockDataStore) AppPassword(ctx context.Context) model.AppPasswordRepository {
+	if db.MockedAppPassword != nil {
+		return db.MockedAppPassword
+	}
+	if db.RealDS != nil {
+		return db.RealDS.AppPassword(ctx)
+	}
+	db.MockedAppPassword = CreateMockAppPasswordRepo()
+	return db.MockedAppPassword
 }
 
 func (db *MockDataStore) Transcoding(ctx context.Context) model.TranscodingRepository {
