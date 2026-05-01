@@ -286,7 +286,7 @@ func getPlayer(players core.Players) func(next http.Handler) http.Handler {
 				}
 				r = r.WithContext(ctx)
 
-				cookie := &http.Cookie{
+				cookie := &http.Cookie{ //nolint:gosec // Secure omitted: Navidrome may run over plain HTTP
 					Name:     playerIDCookieName(userName),
 					Value:    player.ID,
 					MaxAge:   consts.CookieExpiry,
