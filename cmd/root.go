@@ -17,6 +17,7 @@ import (
 	"github.com/navidrome/navidrome/resources"
 	"github.com/navidrome/navidrome/scanner"
 	"github.com/navidrome/navidrome/scheduler"
+	"github.com/navidrome/navidrome/server"
 	"github.com/navidrome/navidrome/server/backgrounds"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -87,6 +88,7 @@ func runNavidrome(ctx context.Context) {
 	g.Go(schedulePeriodicBackup(ctx))
 	g.Go(startInsightsCollector(ctx))
 	g.Go(scheduleDBOptimizer(ctx))
+	g.Go(scheduleLDAPLivenessCheck(ctx))
 	g.Go(startPluginManager(ctx))
 	g.Go(runInitialScan(ctx))
 	if conf.Server.Scanner.Enabled {
@@ -286,6 +288,31 @@ func scheduleDBOptimizer(ctx context.Context) func() error {
 			}
 			db.Optimize(ctx)
 		})
+		return err
+	}
+}
+
+// scheduleLDAPLivenessCheck schedules a recurring sweep that revokes
+// the app passwords of LDAP-backed users who are no longer present (or
+// are flagged disabled) in the configured directory.
+func scheduleLDAPLivenessCheck(ctx context.Context) func() error {
+	return func() error {
+		schedule := conf.Server.LDAP.LivenessSchedule
+		if schedule == "" || conf.Server.LDAP.Host == "" {
+			log.Info(ctx, "LDAP liveness check is DISABLED")
+			return nil
+		}
+
+		ds := CreateDataStore()
+		schedulerInstance := scheduler.GetInstance()
+
+		log.Info("Scheduling LDAP liveness check", "schedule", schedule)
+		_, err := schedulerInstance.Add(schedule, func() {
+			server.LDAPLivenessCheck(ctx, ds)
+		})
+		if err != nil {
+			log.Error(ctx, "Error scheduling LDAP liveness check", err)
+		}
 		return err
 	}
 }
