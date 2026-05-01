@@ -263,6 +263,10 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 	if err := userRepo.ClearPassword(u.ID); err != nil {
 		log.Error("Could not clear persisted password for LDAP user", "user", userName, err)
 	}
+	// Mirror the DB scrub in memory so callers (notably buildAuthPayload's
+	// subsonicToken hash) don't compute over a stale ciphertext loaded by
+	// FindByUsername above.
+	u.Password = ""
 	if err := userRepo.UpdateLastLoginAt(u.ID); err != nil {
 		log.Error("Could not update LastLoginAt", "user", userName, err)
 	}
