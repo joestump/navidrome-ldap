@@ -195,6 +195,20 @@ type ldapOptions struct {
 	// that has been removed. The filter applies to the user's own
 	// attributes — it is NOT formatted with the username.
 	DisabledFilter string
+
+	// AdminGroup is the DN of an LDAP group whose members should be
+	// granted Navidrome admin. When set, IsAdmin is recomputed against
+	// the directory on every LDAP login and on every liveness sweep —
+	// becoming the single source of truth for admin membership. The
+	// search uses `(&(memberOf=<AdminGroup>)<SearchFilter for user>)`.
+	// Mutually exclusive with AdminFilter (AdminGroup wins if both set).
+	AdminGroup string
+	// AdminFilter is an alternative to AdminGroup for directories that
+	// don't expose `memberOf` or for more complex admin-membership rules.
+	// The filter MUST contain `%s`, which is replaced by the escaped
+	// username, mirroring SearchFilter. Example:
+	// `(&(memberOf=cn=nd-admins,ou=groups,dc=example,dc=org)(uid=%s))`.
+	AdminFilter string
 }
 
 type TagConf struct {

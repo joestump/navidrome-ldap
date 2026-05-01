@@ -230,6 +230,24 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 	}
 
 	entry := sr.Entries[0]
+
+	// Admin-group check (if configured). Run BEFORE the user-bind, while
+	// the connection is still authenticated as the service account —
+	// l.Bind below will replace that with the user's bind, which on many
+	// directories cannot read group memberships. The result is only
+	// applied after the user-bind succeeds.
+	var adminCheckResult *bool
+	if adminCheckEnabled() {
+		isAdmin, adminErr := ldapAdminCheck(l, userName)
+		if adminErr != nil {
+			// Transient lookup failure — preserve the existing IsAdmin
+			// to avoid locking the operator out from a directory hiccup.
+			log.Warn("LDAP admin lookup failed; preserving existing IsAdmin", "user", userName, adminErr)
+		} else {
+			adminCheckResult = &isAdmin
+		}
+	}
+
 	// Re-bind as the user to verify their password
 	if err := l.Bind(entry.DN, password); err != nil {
 		log.Warn("LDAP user authentication failed", "user", userName, err)
@@ -251,6 +269,9 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 	u.Name = entry.GetAttributeValue(nameAttr)
 	u.Email = entry.GetAttributeValue(mailAttr)
 	u.AuthType = model.AuthTypeLDAP
+	if adminCheckResult != nil {
+		u.IsAdmin = *adminCheckResult
+	}
 	if err := userRepo.Put(u); err != nil {
 		log.Error("Could not save LDAP user", "user", userName, err)
 		return nil, nil
