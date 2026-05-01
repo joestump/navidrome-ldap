@@ -19,6 +19,13 @@ import (
 // signal to revoke.
 type livenessProbe func(userName string) (active bool, reason string, err error)
 
+// adminProbeFn answers "should this LDAP user be a Navidrome admin?"
+// based on AdminGroup/AdminFilter configuration. nil indicates that no
+// admin policy is configured and the sweep should leave IsAdmin alone.
+// A non-nil error indicates a transient lookup failure — callers MUST
+// preserve the existing IsAdmin rather than demote.
+type adminProbeFn func(userName string) (isAdmin bool, err error)
+
 // LDAPLivenessCheck reconciles every LDAP-backed user against the
 // configured directory and revokes the app passwords of users that no
 // longer match — either because they were removed from the directory or
@@ -48,12 +55,21 @@ func LDAPLivenessCheck(ctx context.Context, ds model.DataStore) {
 		return
 	}
 
-	runLDAPLivenessCheck(ctx, ds, ldapProbe(l))
+	var adminProbe adminProbeFn
+	if adminCheckEnabled() {
+		adminProbe = func(userName string) (bool, error) {
+			return ldapAdminCheck(l, userName)
+		}
+	}
+	runLDAPLivenessCheck(ctx, ds, ldapProbe(l), adminProbe)
 }
 
 // runLDAPLivenessCheck is the testable core: given a probe, walk every
 // LDAP-backed user and revoke app passwords for ones that don't pass.
-func runLDAPLivenessCheck(ctx context.Context, ds model.DataStore, probe livenessProbe) {
+// When adminProbe is non-nil, IsAdmin is also recomputed against the
+// directory and persisted on change. A transient adminProbe error
+// preserves the existing IsAdmin rather than demoting.
+func runLDAPLivenessCheck(ctx context.Context, ds model.DataStore, probe livenessProbe, adminProbe adminProbeFn) {
 	userRepo := ds.User(ctx)
 	users, err := userRepo.GetAll(model.QueryOptions{
 		Filters: squirrel.Eq{"auth_type": model.AuthTypeLDAP},
@@ -69,6 +85,7 @@ func runLDAPLivenessCheck(ctx context.Context, ds model.DataStore, probe livenes
 	appRepo := ds.AppPassword(ctx)
 	checked := 0
 	revoked := 0
+	adminChanged := 0
 	for _, u := range users {
 		// Defense-in-depth: the SQL filter above should have done this,
 		// but never revoke a local user's app passwords just because a
@@ -82,20 +99,40 @@ func runLDAPLivenessCheck(ctx context.Context, ds model.DataStore, probe livenes
 			continue
 		}
 		checked++
-		if active {
-			continue
+
+		if !active {
+			n, revokeErr := appRepo.RevokeAllForUser(u.ID)
+			if revokeErr != nil {
+				log.Error(ctx, "LDAP liveness: failed to revoke app passwords", "user", u.UserName, revokeErr)
+			} else {
+				revoked++
+				log.Info(ctx, "LDAP liveness: revoked app passwords for user no longer authorized",
+					"user", u.UserName, "reason", reason, "appPasswords", n)
+			}
 		}
 
-		n, err := appRepo.RevokeAllForUser(u.ID)
-		if err != nil {
-			log.Error(ctx, "LDAP liveness: failed to revoke app passwords", "user", u.UserName, err)
-			continue
+		// Recompute admin membership when configured. We do this for
+		// inactive users too: if a removed-from-directory admin later
+		// returns without re-validation, their stale IsAdmin should
+		// already be cleared.
+		if adminProbe != nil {
+			newIsAdmin, adminErr := adminProbe(u.UserName)
+			if adminErr != nil {
+				log.Warn(ctx, "LDAP liveness: admin probe failed; preserving IsAdmin", "user", u.UserName, adminErr)
+			} else if u.IsAdmin != newIsAdmin {
+				u.IsAdmin = newIsAdmin
+				if err := ds.User(ctx).Put(&u); err != nil {
+					log.Error(ctx, "LDAP liveness: failed to persist IsAdmin change", "user", u.UserName, err)
+				} else {
+					adminChanged++
+					log.Info(ctx, "LDAP liveness: updated IsAdmin from directory",
+						"user", u.UserName, "isAdmin", newIsAdmin)
+				}
+			}
 		}
-		revoked++
-		log.Info(ctx, "LDAP liveness: revoked app passwords for user no longer authorized",
-			"user", u.UserName, "reason", reason, "appPasswords", n)
 	}
-	log.Debug(ctx, "LDAP liveness: run complete", "users", len(users), "checked", checked, "revoked", revoked)
+	log.Debug(ctx, "LDAP liveness: run complete",
+		"users", len(users), "checked", checked, "revoked", revoked, "adminChanged", adminChanged)
 }
 
 // ldapProbe builds a livenessProbe that consults the given LDAP

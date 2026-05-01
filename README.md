@@ -92,9 +92,12 @@ The sweep is fail-safe: if the directory is unreachable or the service-account b
 
 The interval is the lockout window operators are accepting — pick something that matches the urgency of your offboarding policy. The default is disabled (no sweep).
 
-### TODO
+### Admin role from LDAP
 
-- [ ] Add the ability to auto-assign admins using an LDAP group
+When `ND_LDAP_ADMINGROUP` (or the more flexible `ND_LDAP_ADMINFILTER`) is set, Navidrome treats the directory as the source of truth for admin membership. On every LDAP login *and* on every liveness-check tick, the user's admin status is recomputed: members of the configured group become admins, non-members are demoted. A failed admin lookup never demotes — the previous value is preserved so a transient directory hiccup can't lock the operator out.
+
+> [!IMPORTANT]
+> Add your existing Navidrome admin to the configured admin group **before** enabling this feature, otherwise the next login will demote them.
 
 ### Docker Container
 
@@ -117,6 +120,8 @@ You can configure LDAP using the following environment variables:
 | `ND_LDAP_MAIL` | The LDAP attribute to map to the user's email | `mail` |
 | `ND_LDAP_LIVENESSSCHEDULE` | How often the liveness sweep runs. Accepts a duration (`5m`, `1h`) or a full crontab. Empty disables the sweep. | `15m` |
 | `ND_LDAP_DISABLEDFILTER` | Optional LDAP filter ANDed with `SearchFilter` to flag disabled entries. The filter applies to the user's own attributes — it does not take a `%s`. | `(loginShell=/sbin/nologin)` |
+| `ND_LDAP_ADMINGROUP` | DN of an LDAP group whose members should be Navidrome admins. When set, IsAdmin is recomputed against the directory on every login + liveness sweep. | `cn=nd-admins,ou=groups,dc=example,dc=org` |
+| `ND_LDAP_ADMINFILTER` | Alternative to `AdminGroup` for directories that don't expose `memberOf`. MUST contain `%s` for the username. | `(&(memberOf=cn=nd-admins,...)(uid=%s))` |
 
 ## Translations
 

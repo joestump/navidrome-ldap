@@ -83,7 +83,7 @@ var _ = Describe("LDAP liveness check", func() {
 				}
 				return true, "", nil
 			}
-			runLDAPLivenessCheck(context.Background(), ds, probe)
+			runLDAPLivenessCheck(context.Background(), ds, probe, nil)
 
 			Expect(activeCount("u-missing")).To(Equal(0))
 			Expect(activeCount("u-active")).To(Equal(1))
@@ -95,7 +95,7 @@ var _ = Describe("LDAP liveness check", func() {
 			probe := func(name string) (bool, string, error) {
 				return false, "disabled", nil
 			}
-			runLDAPLivenessCheck(context.Background(), ds, probe)
+			runLDAPLivenessCheck(context.Background(), ds, probe, nil)
 
 			Expect(activeCount("u-disabled")).To(Equal(0))
 		})
@@ -106,7 +106,7 @@ var _ = Describe("LDAP liveness check", func() {
 			probe := func(name string) (bool, string, error) {
 				return false, "", errors.New("transient ldap search failure")
 			}
-			runLDAPLivenessCheck(context.Background(), ds, probe)
+			runLDAPLivenessCheck(context.Background(), ds, probe, nil)
 
 			Expect(activeCount("u-flaky")).To(Equal(1))
 		})
@@ -127,7 +127,7 @@ var _ = Describe("LDAP liveness check", func() {
 			probe := func(name string) (bool, string, error) {
 				return false, "missing", nil
 			}
-			runLDAPLivenessCheck(context.Background(), ds, probe)
+			runLDAPLivenessCheck(context.Background(), ds, probe, nil)
 
 			Expect(activeCount("u-local")).To(Equal(1))
 		})
@@ -138,9 +138,81 @@ var _ = Describe("LDAP liveness check", func() {
 				probeCalls++
 				return true, "", nil
 			}
-			runLDAPLivenessCheck(context.Background(), ds, probe)
+			runLDAPLivenessCheck(context.Background(), ds, probe, nil)
 
 			Expect(probeCalls).To(Equal(0))
+		})
+	})
+
+	Context("admin recompute", func() {
+		alwaysActive := func(name string) (bool, string, error) {
+			return true, "", nil
+		}
+
+		It("promotes a user added to the admin group", func() {
+			seedLDAPUser("u-promote", "promote-me")
+			adminProbe := func(name string) (bool, error) { return true, nil }
+
+			runLDAPLivenessCheck(context.Background(), ds, alwaysActive, adminProbe)
+
+			got, err := users.Get("u-promote")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.IsAdmin).To(BeTrue())
+		})
+
+		It("demotes a user removed from the admin group", func() {
+			Expect(users.Put(&model.User{
+				ID:       "u-demote",
+				UserName: "demote-me",
+				AuthType: model.AuthTypeLDAP,
+				IsAdmin:  true,
+			})).To(Succeed())
+			adminProbe := func(name string) (bool, error) { return false, nil }
+
+			runLDAPLivenessCheck(context.Background(), ds, alwaysActive, adminProbe)
+
+			got, err := users.Get("u-demote")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.IsAdmin).To(BeFalse())
+		})
+
+		It("preserves IsAdmin when the admin probe returns an error", func() {
+			Expect(users.Put(&model.User{
+				ID:       "u-flaky-admin",
+				UserName: "flakyadmin",
+				AuthType: model.AuthTypeLDAP,
+				IsAdmin:  true,
+			})).To(Succeed())
+			adminProbe := func(name string) (bool, error) {
+				return false, errors.New("transient ldap admin lookup failure")
+			}
+
+			runLDAPLivenessCheck(context.Background(), ds, alwaysActive, adminProbe)
+
+			got, err := users.Get("u-flaky-admin")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.IsAdmin).To(BeTrue())
+		})
+
+		It("demotes inactive users that were admin", func() {
+			Expect(users.Put(&model.User{
+				ID:       "u-gone-admin",
+				UserName: "gone",
+				AuthType: model.AuthTypeLDAP,
+				IsAdmin:  true,
+			})).To(Succeed())
+			Expect(appPwds.Put(&model.AppPassword{
+				UserID: "u-gone-admin", Name: "iPad", NewPassword: "p",
+			})).To(Succeed())
+			missing := func(name string) (bool, string, error) { return false, "missing", nil }
+			adminProbe := func(name string) (bool, error) { return false, nil }
+
+			runLDAPLivenessCheck(context.Background(), ds, missing, adminProbe)
+
+			got, err := users.Get("u-gone-admin")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.IsAdmin).To(BeFalse())
+			Expect(activeCount("u-gone-admin")).To(Equal(0))
 		})
 	})
 })
