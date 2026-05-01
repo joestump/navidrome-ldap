@@ -84,10 +84,17 @@ If you ran an earlier version of `navidrome-ldap` that persisted the directory p
 - After migration, Subsonic clients must use an app password. Each user can generate one from their user-edit page (Settings → App Passwords).
 - The migration is one-way per user. Operators who want to flush all persisted passwords up front can have each user log in once, or run a database command to mark all users as LDAP and clear passwords manually.
 
+### Liveness check
+
+When `ND_LDAP_LIVENESSSCHEDULE` is set, Navidrome runs a recurring sweep that reconciles every LDAP-backed user against the directory. If a user has been removed from the directory (or matches the optional `ND_LDAP_DISABLEDFILTER` clause), the sweep revokes all of that user's app passwords. Combined with PR #11's empty stored password, this is the lockout mechanism for LDAP-managed accounts: revoking the app passwords removes the only credential they had for the Subsonic API, and they can no longer log in to the web UI either (LDAP rejects them, and there is no local password to fall back on).
+
+The sweep is fail-safe: if the directory is unreachable or the service-account bind fails, the run is aborted without revoking anything. Per-user search errors log a warning and skip just that user.
+
+The interval is the lockout window operators are accepting — pick something that matches the urgency of your offboarding policy. The default is disabled (no sweep).
+
 ### TODO
 
 - [ ] Add the ability to auto-assign admins using an LDAP group
-- [ ] Periodic LDAP liveness check to revoke disabled accounts
 
 ### Docker Container
 
@@ -108,6 +115,8 @@ You can configure LDAP using the following environment variables:
 | `ND_LDAP_SEARCHFILTER` | The filter to search for users. `%s` is replaced by the username | `(uid=%s)` |
 | `ND_LDAP_NAME` | The LDAP attribute to map to the user's full name | `cn` |
 | `ND_LDAP_MAIL` | The LDAP attribute to map to the user's email | `mail` |
+| `ND_LDAP_LIVENESSSCHEDULE` | How often the liveness sweep runs. Accepts a duration (`5m`, `1h`) or a full crontab. Empty disables the sweep. | `15m` |
+| `ND_LDAP_DISABLEDFILTER` | Optional LDAP filter ANDed with `SearchFilter` to flag disabled entries. The filter applies to the user's own attributes — it does not take a `%s`. | `(loginShell=/sbin/nologin)` |
 
 ## Translations
 

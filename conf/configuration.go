@@ -180,6 +180,21 @@ type ldapOptions struct {
 	SearchFilter string
 	Mail         string
 	Name         string
+
+	// LivenessSchedule, when non-empty, schedules a background sweep that
+	// reconciles each LDAP-backed user against the directory and revokes
+	// the app passwords of users that no longer match. Accepts any
+	// scheduler spec (a duration like "5m" or a full crontab). Empty
+	// disables the sweep.
+	LivenessSchedule string
+	// DisabledFilter is an optional LDAP filter clause that, when ANDed
+	// with the per-user SearchFilter, identifies disabled directory
+	// entries (e.g. AD's `(userAccountControl:1.2.840.113556.1.4.803:=2)`
+	// or a custom `(loginShell=/sbin/nologin)`). When set, an entry that
+	// still exists but matches this filter is treated the same as one
+	// that has been removed. The filter applies to the user's own
+	// attributes — it is NOT formatted with the username.
+	DisabledFilter string
 }
 
 type TagConf struct {
@@ -389,6 +404,7 @@ func Load(noConfigDump bool) {
 	err = run.Sequentially(
 		validateScanSchedule,
 		validateBackupSchedule,
+		validateLDAPLivenessSchedule,
 		validatePlaylistsPath,
 		validatePurgeMissingOption,
 		validateMaxImageUploadSize,
@@ -641,6 +657,16 @@ func validateScanSchedule() error {
 	}
 	var err error
 	Server.Scanner.Schedule, err = validateSchedule(Server.Scanner.Schedule, "Scanner.Schedule")
+	return err
+}
+
+func validateLDAPLivenessSchedule() error {
+	if Server.LDAP.LivenessSchedule == "0" || Server.LDAP.LivenessSchedule == "" {
+		Server.LDAP.LivenessSchedule = ""
+		return nil
+	}
+	var err error
+	Server.LDAP.LivenessSchedule, err = validateSchedule(Server.LDAP.LivenessSchedule, "LDAP.LivenessSchedule")
 	return err
 }
 
