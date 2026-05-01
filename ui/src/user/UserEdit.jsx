@@ -131,20 +131,28 @@ const UserEdit = (props) => {
           {...getNameHelperText()}
         />
         <TextInput spellCheck={false} source="email" validate={[email()]} />
-        <BooleanInput source="changePassword" />
         <FormDataConsumer>
-          {(formDataProps) => (
-            <CurrentPasswordInput
-              spellCheck={false}
-              isMyself={isMyself}
-              {...formDataProps}
-            />
-          )}
-        </FormDataConsumer>
-        <FormDataConsumer>
-          {(formDataProps) => (
-            <NewPasswordInput spellCheck={false} {...formDataProps} />
-          )}
+          {({ formData }) =>
+            formData.authType === 'ldap' ? (
+              <Typography
+                variant="body2"
+                color="textSecondary"
+                style={{ marginTop: 16, marginBottom: 16 }}
+              >
+                {translate('resources.user.message.ldapManagedPassword')}
+              </Typography>
+            ) : (
+              <>
+                <BooleanInput source="changePassword" />
+                <CurrentPasswordInput
+                  spellCheck={false}
+                  isMyself={isMyself}
+                  formData={formData}
+                />
+                <NewPasswordInput spellCheck={false} formData={formData} />
+              </>
+            )
+          }
         </FormDataConsumer>
 
         {permissions === 'admin' && (

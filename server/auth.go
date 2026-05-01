@@ -155,6 +155,13 @@ func createAdminUser(ctx context.Context, ds model.DataStore, username, password
 }
 
 func ValidateLogin(userRepo model.UserRepository, userName, password string) (*model.User, error) {
+	// Empty passwords never authenticate. LDAP-backed users have an empty
+	// `password` column (cleared by ClearPassword on every login), so an
+	// empty submitted password would otherwise match the empty stored one
+	// in the local fallback below.
+	if password == "" {
+		return nil, nil
+	}
 	u, err := validateLoginLDAP(userRepo, userName, password)
 	if u != nil && err == nil {
 		return u, nil
@@ -165,6 +172,12 @@ func ValidateLogin(userRepo model.UserRepository, userName, password string) (*m
 	}
 	if err != nil {
 		return nil, err
+	}
+	// LDAP-backed users have no valid local password. If we reached this
+	// point for one (LDAP unreachable, directory bind failed, etc.), refuse
+	// rather than fall through to the local-password compare.
+	if u.IsLDAP() || u.Password == "" {
+		return nil, nil
 	}
 	if u.Password != password {
 		return nil, nil
@@ -223,7 +236,11 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 		return nil, nil
 	}
 
-	// User authenticated; sync to local DB so Subsonic clients can use token auth
+	// User authenticated. Sync the directory-sourced attributes to the
+	// local DB but DO NOT persist the directory password. LDAP-backed users
+	// authenticate against the directory on every web login; for the
+	// Subsonic API they must use an app password (which is independent and
+	// revocable).
 	u, err := userRepo.FindByUsername(userName)
 	if errors.Is(err, model.ErrNotFound) {
 		u = &model.User{UserName: userName}
@@ -233,11 +250,23 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 	}
 	u.Name = entry.GetAttributeValue(nameAttr)
 	u.Email = entry.GetAttributeValue(mailAttr)
-	u.NewPassword = password
+	u.AuthType = model.AuthTypeLDAP
 	if err := userRepo.Put(u); err != nil {
 		log.Error("Could not save LDAP user", "user", userName, err)
 		return nil, nil
 	}
+	// Clear any password that may have been persisted by a previous version
+	// of this code (or by the user being promoted from local → LDAP). This
+	// is the migration path for existing LDAP users post-upgrade: their
+	// first login here scrubs the old reversibly-encrypted directory
+	// password from the DB.
+	if err := userRepo.ClearPassword(u.ID); err != nil {
+		log.Error("Could not clear persisted password for LDAP user", "user", userName, err)
+	}
+	// Mirror the DB scrub in memory so callers (notably buildAuthPayload's
+	// subsonicToken hash) don't compute over a stale ciphertext loaded by
+	// FindByUsername above.
+	u.Password = ""
 	if err := userRepo.UpdateLastLoginAt(u.ID); err != nil {
 		log.Error("Could not update LastLoginAt", "user", userName, err)
 	}

@@ -139,13 +139,26 @@ func authenticate(ds model.DataStore) func(next http.Handler) http.Handler {
 				// LDAP deployments with lockout policies (AD lockoutThreshold,
 				// FreeIPA password policy) would otherwise lock the user's
 				// directory account on every legitimate app-password request.
+				//
+				// We also use this lookup to enforce the LDAP-no-direct-password
+				// policy: an LDAP-backed user MUST authenticate with an app
+				// password — their directory password is no longer accepted at
+				// /rest, even via legacy `p=` or salt+token, since it would
+				// otherwise still be checkable via the LDAP bind in
+				// `ValidateLogin` and persist the directory password problem.
 				if jwt == "" && (pass != "" || token != "") {
-					if appUsr, appID, ok := matchAppPassword(ctx, ds, username, pass, token, salt); ok {
+					lookupUsr, appID, ok := matchAppPassword(ctx, ds, username, pass, token, salt)
+					if ok {
 						if touchErr := ds.AppPassword(ctx).Touch(appID); touchErr != nil {
 							log.Warn(ctx, "API: Failed to bump app password last_used_at", "id", appID, "username", username, touchErr)
 						}
-						ctx = request.WithUser(ctx, *appUsr)
+						ctx = request.WithUser(ctx, *lookupUsr)
 						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+					if lookupUsr != nil && lookupUsr.IsLDAP() {
+						log.Warn(ctx, "API: Rejecting non-app-password Subsonic auth for LDAP user", "username", username, "remoteAddr", r.RemoteAddr)
+						sendError(w, r, newError(responses.ErrorAuthenticationFail))
 						return
 					}
 				}
@@ -202,8 +215,14 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 				pass = string(dec)
 			}
 		}
-		valid = pass == user.Password
+		// Empty stored password (LDAP users post-ClearPassword, mid-migration
+		// rows, etc.) must never be a valid credential — the comparison
+		// `"" == ""` would otherwise succeed.
+		valid = pass != "" && user.Password != "" && pass == user.Password
 	case token != "":
+		if user.Password == "" {
+			break
+		}
 		t := fmt.Sprintf("%x", md5.Sum([]byte(user.Password+salt)))
 		valid = t == token
 	}
@@ -215,10 +234,15 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 }
 
 // matchAppPassword tries to authenticate the request against the user's
-// active app passwords. Returns the user, the matched app password ID, and
-// true on success. The caller is responsible for bumping last_used_at on
-// the returned ID. `pass` MUST already be the decoded plaintext (the parent
-// `authenticate` flow handles `enc:` decoding once); we do not decode again.
+// active app passwords. Returns:
+//   - (user, appID, true)  on a match
+//   - (user, "",   false)  when the user exists but no app password matched
+//     (so the caller can decide whether to fall through or reject — the
+//     LDAP-user-must-use-app-password gate uses this case)
+//   - (nil,  "",   false)  when the user doesn't exist or lookup failed
+//
+// `pass` MUST already be the decoded plaintext (the parent `authenticate`
+// flow handles `enc:` decoding once); we do not decode again.
 func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, token, salt string) (*model.User, string, bool) {
 	if username == "" {
 		return nil, "", false
@@ -230,7 +254,7 @@ func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, t
 	active, err := ds.AppPassword(ctx).FindActiveByUser(usr.ID)
 	if err != nil {
 		log.Warn(ctx, "API: Error loading app passwords", "username", username, err)
-		return nil, "", false
+		return usr, "", false
 	}
 	for _, ap := range active {
 		switch {
@@ -240,7 +264,7 @@ func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, t
 			return usr, ap.ID, true
 		}
 	}
-	return nil, "", false
+	return usr, "", false
 }
 
 func getPlayer(players core.Players) func(next http.Handler) http.Handler {
@@ -262,7 +286,7 @@ func getPlayer(players core.Players) func(next http.Handler) http.Handler {
 				}
 				r = r.WithContext(ctx)
 
-				cookie := &http.Cookie{
+				cookie := &http.Cookie{ //nolint:gosec // Secure omitted: Navidrome may run over plain HTTP
 					Name:     playerIDCookieName(userName),
 					Value:    player.ID,
 					MaxAge:   consts.CookieExpiry,
