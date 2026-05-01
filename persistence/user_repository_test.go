@@ -7,10 +7,12 @@ import (
 
 	"github.com/Masterminds/squirrel"
 	"github.com/deluan/rest"
+	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/log"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/id"
+	"github.com/navidrome/navidrome/model/request"
 	"github.com/navidrome/navidrome/tests"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -90,6 +92,79 @@ var _ = Describe("UserRepository", func() {
 			Expect(err).ToNot(HaveOccurred())
 			Expect(got.AuthType).To(Equal(model.AuthTypeLDAP))
 			Expect(got.IsLDAP()).To(BeTrue())
+		})
+	})
+
+	Describe("Update preserves AuthType", func() {
+		// auth_type must be immutable through the REST PUT path. A caller
+		// that omits (or falsifies) the field must not be able to demote an
+		// LDAP-backed user to local — that would combine with ClearPassword
+		// to produce an empty-password local account, which the auth path
+		// would otherwise accept on an empty supplied password.
+		var (
+			adminCtx context.Context
+			userCtx  context.Context
+		)
+
+		BeforeEach(func() {
+			adminCtx = request.WithUser(log.NewContext(GinkgoT().Context()), adminUser)
+			ldapUsr := model.User{
+				ID:       "ldap-update-1",
+				UserName: "ldap-update-user",
+				Name:     "LDAP Update",
+				AuthType: model.AuthTypeLDAP,
+			}
+			Expect(NewUserRepository(adminCtx, GetDBXBuilder()).Put(&ldapUsr)).To(Succeed())
+			Expect(NewUserRepository(adminCtx, GetDBXBuilder()).ClearPassword(ldapUsr.ID)).To(Succeed())
+
+			userCtx = request.WithUser(
+				log.NewContext(GinkgoT().Context()),
+				model.User{ID: "ldap-update-1", UserName: "ldap-update-user"},
+			)
+		})
+
+		It("admin PUT omitting authType keeps the LDAP designation", func() {
+			repo := NewUserRepository(adminCtx, GetDBXBuilder()).(rest.Persistable)
+			Expect(repo.Update("ldap-update-1", &model.User{
+				ID:       "ldap-update-1",
+				UserName: "ldap-update-user",
+				Name:     "Renamed",
+				Email:    "renamed@example.com",
+			})).To(Succeed())
+
+			got, err := NewUserRepository(adminCtx, GetDBXBuilder()).Get("ldap-update-1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.AuthType).To(Equal(model.AuthTypeLDAP))
+			Expect(got.Name).To(Equal("Renamed"))
+		})
+
+		It("admin PUT explicitly setting authType=local is ignored", func() {
+			repo := NewUserRepository(adminCtx, GetDBXBuilder()).(rest.Persistable)
+			Expect(repo.Update("ldap-update-1", &model.User{
+				ID:       "ldap-update-1",
+				UserName: "ldap-update-user",
+				Name:     "Still LDAP",
+				AuthType: model.AuthTypeLocal,
+			})).To(Succeed())
+
+			got, err := NewUserRepository(adminCtx, GetDBXBuilder()).Get("ldap-update-1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.AuthType).To(Equal(model.AuthTypeLDAP))
+		})
+
+		It("non-admin self-PUT cannot mutate authType", func() {
+			conf.Server.EnableUserEditing = true
+			repo := NewUserRepository(userCtx, GetDBXBuilder()).(rest.Persistable)
+			Expect(repo.Update("ldap-update-1", &model.User{
+				ID:       "ldap-update-1",
+				UserName: "ldap-update-user",
+				Name:     "Self-rename",
+				AuthType: model.AuthTypeLocal,
+			})).To(Succeed())
+
+			got, err := NewUserRepository(adminCtx, GetDBXBuilder()).Get("ldap-update-1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.AuthType).To(Equal(model.AuthTypeLDAP))
 		})
 	})
 

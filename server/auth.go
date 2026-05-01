@@ -155,6 +155,13 @@ func createAdminUser(ctx context.Context, ds model.DataStore, username, password
 }
 
 func ValidateLogin(userRepo model.UserRepository, userName, password string) (*model.User, error) {
+	// Empty passwords never authenticate. LDAP-backed users have an empty
+	// `password` column (cleared by ClearPassword on every login), so an
+	// empty submitted password would otherwise match the empty stored one
+	// in the local fallback below.
+	if password == "" {
+		return nil, nil
+	}
 	u, err := validateLoginLDAP(userRepo, userName, password)
 	if u != nil && err == nil {
 		return u, nil
@@ -165,6 +172,12 @@ func ValidateLogin(userRepo model.UserRepository, userName, password string) (*m
 	}
 	if err != nil {
 		return nil, err
+	}
+	// LDAP-backed users have no valid local password. If we reached this
+	// point for one (LDAP unreachable, directory bind failed, etc.), refuse
+	// rather than fall through to the local-password compare.
+	if u.IsLDAP() || u.Password == "" {
+		return nil, nil
 	}
 	if u.Password != password {
 		return nil, nil

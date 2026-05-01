@@ -177,5 +177,10 @@ func (u *MockedUserRepo) Update(id string, entity any, cols ...string) error {
 	}
 	usr := entity.(*model.User)
 	usr.ID = id
+	// Mirror userRepository.Update: auth_type is preserved from the
+	// existing row, never taken from the incoming payload.
+	if existing, err := u.Get(id); err == nil {
+		usr.AuthType = existing.AuthType
+	}
 	return u.Put(usr)
 }

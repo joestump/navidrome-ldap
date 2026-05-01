@@ -215,8 +215,14 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 				pass = string(dec)
 			}
 		}
-		valid = pass == user.Password
+		// Empty stored password (LDAP users post-ClearPassword, mid-migration
+		// rows, etc.) must never be a valid credential — the comparison
+		// `"" == ""` would otherwise succeed.
+		valid = pass != "" && user.Password != "" && pass == user.Password
 	case token != "":
+		if user.Password == "" {
+			break
+		}
 		t := fmt.Sprintf("%x", md5.Sum([]byte(user.Password+salt)))
 		valid = t == token
 	}

@@ -252,4 +252,47 @@ var _ = Describe("App Password Subsonic Auth", func() {
 			Expect(w.Body.String()).To(ContainSubstring(`code="40"`))
 		})
 	})
+
+	// Defense-in-depth against empty-password authentication. A user whose
+	// stored `password` column is empty (LDAP user post-ClearPassword, a
+	// row mid-migration, etc.) must never authenticate via /rest with an
+	// empty submitted credential.
+	When("the user's stored password is empty", func() {
+		const emptyUser = "scrubbed"
+		const emptyUserID = "uid-scrubbed"
+
+		BeforeEach(func() {
+			Expect(ds.User(context.TODO()).Put(&model.User{
+				ID:       emptyUserID,
+				UserName: emptyUser,
+			})).To(Succeed())
+			Expect(ds.User(context.TODO()).ClearPassword(emptyUserID)).To(Succeed())
+		})
+
+		It("rejects empty `p=`", func() {
+			r := newGetRequest("u="+emptyUser, "p=")
+			authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+			Expect(nextHandler.called).To(BeFalse())
+			Expect(w.Body.String()).To(ContainSubstring(`code="40"`))
+		})
+
+		It("rejects an `enc:` value that decodes to empty", func() {
+			r := newGetRequest("u="+emptyUser, "p=enc:")
+			authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+			Expect(nextHandler.called).To(BeFalse())
+			Expect(w.Body.String()).To(ContainSubstring(`code="40"`))
+		})
+
+		It("rejects salt+token computed from an empty password", func() {
+			const salt = "saltysalt"
+			token := fmt.Sprintf("%x", md5.Sum([]byte(""+salt)))
+			r := newGetRequest("u="+emptyUser, "t="+token, "s="+salt)
+			authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+			Expect(nextHandler.called).To(BeFalse())
+			Expect(w.Body.String()).To(ContainSubstring(`code="40"`))
+		})
+	})
 })

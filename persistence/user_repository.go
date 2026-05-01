@@ -289,6 +289,21 @@ func (r *userRepository) Update(id string, entity any, _ ...string) error {
 		u.UserName = usr.UserName
 	}
 
+	// auth_type is not mutable through this REST path — it is managed by
+	// the login flow (validateLoginLDAP sets it). Allowing it to change
+	// here would let any caller demote an LDAP user to local with an empty
+	// password by simply omitting the field from the request body, which
+	// would then satisfy the local-password compare against the empty
+	// `password` column written by ClearPassword.
+	existing, err := r.Get(id)
+	if err != nil {
+		if errors.Is(err, model.ErrNotFound) {
+			return rest.ErrNotFound
+		}
+		return err
+	}
+	u.AuthType = existing.AuthType
+
 	// Decrypt the user's existing password before validating. This is required otherwise the existing password entered by the user will never match.
 	if err := r.decryptPassword(usr); err != nil {
 		return err
@@ -299,7 +314,7 @@ func (r *userRepository) Update(id string, entity any, _ ...string) error {
 	if err := validateUsernameUnique(r, u); err != nil {
 		return err
 	}
-	err := r.Put(u)
+	err = r.Put(u)
 	if errors.Is(err, model.ErrNotFound) {
 		return rest.ErrNotFound
 	}
@@ -442,6 +457,13 @@ func (r *userRepository) encryptPassword(u *model.User) error {
 
 // decrypts u.Password
 func (r *userRepository) decryptPassword(u *model.User) error {
+	// LDAP-backed users (and freshly-created users that have never had a
+	// password set) have an empty `password` column. Decrypting an empty
+	// string panics inside utils.Decrypt — pre-empt that, since there is
+	// no ciphertext to decrypt anyway.
+	if u.Password == "" {
+		return nil
+	}
 	plaintext, err := utils.Decrypt(r.ctx, encKey, u.Password)
 	if err != nil {
 		log.Error(r.ctx, "Error decrypting user's password", "user", u.UserName, err)
