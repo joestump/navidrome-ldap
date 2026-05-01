@@ -153,7 +153,10 @@ var _ = Describe("UserRepository", func() {
 		})
 
 		It("non-admin self-PUT cannot mutate authType", func() {
+			prev := conf.Server.EnableUserEditing
 			conf.Server.EnableUserEditing = true
+			DeferCleanup(func() { conf.Server.EnableUserEditing = prev })
+
 			repo := NewUserRepository(userCtx, GetDBXBuilder()).(rest.Persistable)
 			Expect(repo.Update("ldap-update-1", &model.User{
 				ID:       "ldap-update-1",
