@@ -194,7 +194,8 @@
         "appPasswordCreated": "App password created",
         "appPasswordOneTime": "Save this secret now — it will not be shown again. Paste it into your Subsonic client in place of your account password.",
         "appPasswordActive": "Active",
-        "appPasswordRevoked": "Revoked"
+        "appPasswordRevoked": "Revoked",
+        "ldapManagedPassword": "This account authenticates against LDAP. Sign in with your directory password and use an app password (below) for Subsonic clients."
       }
     },
     "player": {

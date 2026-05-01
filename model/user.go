@@ -4,12 +4,21 @@ import (
 	"time"
 )
 
+// AuthType values for User.AuthType. Drives password-storage and
+// /rest-auth policy: LDAP-backed users do not have a persisted password
+// and may only authenticate to the Subsonic API via app passwords.
+const (
+	AuthTypeLocal = "local"
+	AuthTypeLDAP  = "ldap"
+)
+
 type User struct {
 	ID           string     `structs:"id" json:"id"`
 	UserName     string     `structs:"user_name" json:"userName"`
 	Name         string     `structs:"name" json:"name"`
 	Email        string     `structs:"email" json:"email"`
 	IsAdmin      bool       `structs:"is_admin" json:"isAdmin"`
+	AuthType     string     `structs:"auth_type" json:"authType"`
 	LastLoginAt  *time.Time `structs:"last_login_at" json:"lastLoginAt"`
 	LastAccessAt *time.Time `structs:"last_access_at" json:"lastAccessAt"`
 	CreatedAt    time.Time  `structs:"created_at" json:"createdAt"`
@@ -39,6 +48,13 @@ func (u User) HasLibraryAccess(libraryID int) bool {
 	return false
 }
 
+// IsLDAP reports whether the user is authenticated against the configured
+// LDAP directory. LDAP-backed users have no persisted password and must use
+// app passwords for the Subsonic API.
+func (u User) IsLDAP() bool {
+	return u.AuthType == AuthTypeLDAP
+}
+
 type Users []User
 
 type UserRepository interface {
@@ -55,6 +71,10 @@ type UserRepository interface {
 	FindByUsername(username string) (*User, error)
 	// FindByUsernameWithPassword is the same as above, but also returns the decrypted password
 	FindByUsernameWithPassword(username string) (*User, error)
+	// ClearPassword removes any persisted password from the user record. Used
+	// when promoting a user to LDAP-backed: their directory password must
+	// not remain reversibly-encrypted in the DB.
+	ClearPassword(id string) error
 
 	// Library association methods
 	GetUserLibraries(userID string) (Libraries, error)

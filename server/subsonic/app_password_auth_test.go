@@ -202,4 +202,54 @@ var _ = Describe("App Password Subsonic Auth", func() {
 
 		Expect(nextHandler.called).To(BeTrue())
 	})
+
+	// LDAP-backed users may not authenticate Subsonic clients with their
+	// directory password — only with an app password. (Issue #7.)
+	When("the user is LDAP-backed", func() {
+		const ldapUser = "ldapper"
+		const ldapUserID = "uid-ldapper"
+		const ldapDirPlaintext = "directory-plaintext"
+		const ldapAppPlaintext = "ldap-tempus-app-plaintext"
+
+		BeforeEach(func() {
+			Expect(ds.User(context.TODO()).Put(&model.User{
+				ID:       ldapUserID,
+				UserName: ldapUser,
+				AuthType: model.AuthTypeLDAP,
+				// LDAP users have no persisted password, but set one
+				// here to prove that even if it leaks back into the DB,
+				// it cannot be used for /rest auth.
+				NewPassword: ldapDirPlaintext,
+			})).To(Succeed())
+			Expect(ds.AppPassword(context.TODO()).Put(&model.AppPassword{
+				UserID:      ldapUserID,
+				Name:        "iPhone",
+				NewPassword: ldapAppPlaintext,
+			})).To(Succeed())
+		})
+
+		It("accepts the app password", func() {
+			r := newGetRequest("u="+ldapUser, "p="+ldapAppPlaintext)
+			authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+			Expect(nextHandler.called).To(BeTrue())
+		})
+
+		It("rejects the LDAP directory password via legacy `p=` auth", func() {
+			r := newGetRequest("u="+ldapUser, "p="+ldapDirPlaintext)
+			authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+			Expect(nextHandler.called).To(BeFalse())
+			Expect(w.Body.String()).To(ContainSubstring(`code="40"`))
+		})
+
+		It("rejects the LDAP directory password via salt+token", func() {
+			token := fmt.Sprintf("%x", md5.Sum([]byte(ldapDirPlaintext+"saltysalt")))
+			r := newGetRequest("u="+ldapUser, "t="+token, "s=saltysalt")
+			authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+			Expect(nextHandler.called).To(BeFalse())
+			Expect(w.Body.String()).To(ContainSubstring(`code="40"`))
+		})
+	})
 })

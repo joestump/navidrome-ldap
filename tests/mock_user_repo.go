@@ -101,6 +101,20 @@ func (u *MockedUserRepo) UpdateLastAccessAt(id string) error {
 	return u.Error
 }
 
+func (u *MockedUserRepo) ClearPassword(id string) error {
+	if u.Error != nil {
+		return u.Error
+	}
+	for _, usr := range u.Data {
+		if usr.ID == id {
+			usr.Password = ""
+			usr.NewPassword = ""
+			return nil
+		}
+	}
+	return model.ErrNotFound
+}
+
 // Library association methods - mock implementations
 
 func (u *MockedUserRepo) GetUserLibraries(userID string) (model.Libraries, error) {

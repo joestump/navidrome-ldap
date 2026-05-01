@@ -116,6 +116,12 @@ func (r *userRepository) Put(u *model.User) error {
 		u.ID = id.NewRandom()
 	}
 	u.UpdatedAt = time.Now()
+	if u.AuthType == "" {
+		// The DB column has DEFAULT 'local', but toSQLArgs sends every
+		// struct field so an empty AuthType would override the default.
+		// Set it explicitly so the in-memory and persisted state agree.
+		u.AuthType = model.AuthTypeLocal
+	}
 	if u.NewPassword != "" {
 		_ = r.encryptPassword(u)
 	}
@@ -196,6 +202,15 @@ func (r *userRepository) FindByUsernameWithPassword(username string) (*model.Use
 
 func (r *userRepository) UpdateLastLoginAt(id string) error {
 	upd := Update(r.tableName).Where(Eq{"id": id}).Set("last_login_at", time.Now())
+	_, err := r.executeSQL(upd)
+	return err
+}
+
+// ClearPassword removes any persisted password from the user record. Called
+// when an LDAP-backed user is being created or promoted: their directory
+// password must not survive in the DB.
+func (r *userRepository) ClearPassword(id string) error {
+	upd := Update(r.tableName).Where(Eq{"id": id}).Set("password", "")
 	_, err := r.executeSQL(upd)
 	return err
 }

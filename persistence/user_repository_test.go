@@ -71,6 +71,45 @@ var _ = Describe("UserRepository", func() {
 		})
 	})
 
+	Describe("AuthType", func() {
+		It("defaults to local for new users and round-trips", func() {
+			u := &model.User{ID: "auth-1", UserName: "local-user", Name: "Local", NewPassword: "x"}
+			Expect(repo.Put(u)).To(Succeed())
+
+			got, err := repo.Get("auth-1")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.AuthType).To(Equal(model.AuthTypeLocal))
+			Expect(got.IsLDAP()).To(BeFalse())
+		})
+
+		It("persists ldap when set explicitly", func() {
+			u := &model.User{ID: "auth-2", UserName: "ldap-user", Name: "LDAP", AuthType: model.AuthTypeLDAP}
+			Expect(repo.Put(u)).To(Succeed())
+
+			got, err := repo.Get("auth-2")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(got.AuthType).To(Equal(model.AuthTypeLDAP))
+			Expect(got.IsLDAP()).To(BeTrue())
+		})
+	})
+
+	Describe("ClearPassword", func() {
+		It("scrubs the persisted password", func() {
+			u := &model.User{ID: "clr-1", UserName: "clr-user", Name: "Clr", NewPassword: "to-be-cleared"}
+			Expect(repo.Put(u)).To(Succeed())
+
+			before, err := repo.FindByUsernameWithPassword("clr-user")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(before.Password).To(Equal("to-be-cleared"))
+
+			Expect(repo.ClearPassword("clr-1")).To(Succeed())
+
+			after, err := repo.FindByUsernameWithPassword("clr-user")
+			Expect(err).ToNot(HaveOccurred())
+			Expect(after.Password).To(BeEmpty())
+		})
+	})
+
 	Describe("validatePasswordChange", func() {
 		var loggedUser *model.User
 
