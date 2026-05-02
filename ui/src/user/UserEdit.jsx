@@ -24,7 +24,6 @@ import { Typography } from '@material-ui/core'
 import { Title } from '../common'
 import DeleteUserButton from './DeleteUserButton'
 import { LibrarySelectionField } from './LibrarySelectionField.jsx'
-import { AppPasswordPanel } from './AppPasswordPanel.jsx'
 import { validateUserForm } from './userValidation'
 
 const useStyles = makeStyles({
@@ -75,11 +74,12 @@ const UserEdit = (props) => {
   const refresh = useRefresh()
 
   const isMyself = props.id === localStorage.getItem('userId')
-  const getNameHelperText = () =>
-    isMyself && {
-      helperText: translate('resources.user.helperTexts.name'),
-    }
   const canDelete = permissions === 'admin' && !isMyself
+  const nameHelperText = (ldap) => {
+    if (ldap) return translate('resources.user.helperTexts.ldapManagedField')
+    if (isMyself) return translate('resources.user.helperTexts.name')
+    return undefined
+  }
 
   const save = useCallback(
     async (values) => {
@@ -118,18 +118,42 @@ const UserEdit = (props) => {
         save={save}
         validate={validateForm}
       >
-        {permissions === 'admin' && (
-          <TextInput
-            spellCheck={false}
-            source="userName"
-            validate={[required()]}
-          />
-        )}
-        <TextInput
-          source="name"
-          validate={[required()]}
-          {...getNameHelperText()}
-        />
+        <FormDataConsumer>
+          {({ formData }) => {
+            const ldap = formData.authType === 'ldap'
+            // For LDAP-backed users the directory is the source of
+            // truth — userName and name get rewritten on every login
+            // from the LDAP attributes, so editing them locally is at
+            // best transient and at worst confusing. Render them
+            // disabled (admins still see the field, but can't change
+            // it) so it's clear why.
+            return (
+              <>
+                {permissions === 'admin' && (
+                  <TextInput
+                    spellCheck={false}
+                    source="userName"
+                    validate={[required()]}
+                    disabled={ldap}
+                    helperText={
+                      ldap
+                        ? translate(
+                            'resources.user.helperTexts.ldapManagedField',
+                          )
+                        : undefined
+                    }
+                  />
+                )}
+                <TextInput
+                  source="name"
+                  validate={[required()]}
+                  disabled={ldap}
+                  helperText={nameHelperText(ldap)}
+                />
+              </>
+            )
+          }}
+        </FormDataConsumer>
         <TextInput spellCheck={false} source="email" validate={[email()]} />
         <FormDataConsumer>
           {({ formData }) =>
@@ -184,8 +208,6 @@ const UserEdit = (props) => {
         <DateField variant="body1" source="lastAccessAt" showTime />
         <DateField variant="body1" source="updatedAt" showTime />
         <DateField variant="body1" source="createdAt" showTime />
-
-        <AppPasswordPanel userId={props.id} />
       </SimpleForm>
     </Edit>
   )
