@@ -99,6 +99,11 @@ When `ND_LDAP_ADMINGROUP` (or the more flexible `ND_LDAP_ADMINFILTER`) is set, N
 > [!IMPORTANT]
 > Add your existing Navidrome admin to the configured admin group **before** enabling this feature, otherwise the next login will demote them.
 
+> [!WARNING]
+> **Demotion does not revoke library access.** Upstream Navidrome auto-grants every library to a user when they're saved with `IsAdmin == true`, but there is no symmetric revoke when admin is removed. After a demotion (whether at login or on a liveness tick), the user keeps their `user_library` rows and therefore retains access to every library the admin shortcut had silently materialized for them. The fork does not auto-clean these rows because they have no provenance metadata — operator-assigned grants and admin-auto-grants are indistinguishable, and a blanket reset would destroy explicit assignments.
+>
+> When you remove a user from the LDAP admin group (or expect a sweep tick to do it), review their library access manually in the user-edit screen and prune any rows the user shouldn't keep.
+
 ### Docker Container
 
 To use LDAP features, you must use [the fork's Docker image](https://github.com/joestump/navidrome-ldap/pkgs/container/navidrome-ldap):
