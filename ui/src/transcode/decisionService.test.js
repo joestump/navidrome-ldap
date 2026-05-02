@@ -64,8 +64,8 @@ describe('decisionService', () => {
 
   beforeEach(() => {
     localStorage.setItem('username', 'testuser')
-    localStorage.setItem('subsonic-token', 'testtoken')
-    localStorage.setItem('subsonic-salt', 'testsalt')
+    localStorage.setItem('token', 'test-jwt-token')
+
     mockFetchFn = vi.fn().mockImplementation(() => {
       return Promise.resolve(makeFakeDecision())
     })

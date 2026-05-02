@@ -13,8 +13,7 @@ describe('getCoverArtUrl', () => {
       getItem: vi.fn((key) => {
         const values = {
           username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
+          token: 'test-jwt-token',
         }
         return values[key] || null
       }),
@@ -128,8 +127,7 @@ describe('getDiscCoverArtUrl', () => {
       getItem: vi.fn((key) => {
         const values = {
           username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
+          token: 'test-jwt-token',
         }
         return values[key] || null
       }),
@@ -172,6 +170,43 @@ describe('getDiscCoverArtUrl', () => {
   })
 })
 
+describe('auth params', () => {
+  beforeEach(() => {
+    delete window.location
+    window.location = { href: 'http://localhost:3000/app' }
+  })
+
+  it('uses JWT (?jwt=) and never sends salt+token (?s=, ?t=)', () => {
+    const localStorageMock = {
+      getItem: vi.fn((key) => {
+        const values = { username: 'testuser', token: 'jwt-abc' }
+        return values[key] || null
+      }),
+    }
+    Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+
+    const url = subsonic.getCoverArtUrl({ id: 'a' }, 100)
+
+    expect(url).toContain('u=testuser')
+    expect(url).toContain('jwt=jwt-abc')
+    expect(url).not.toContain('&s=')
+    expect(url).not.toContain('&t=')
+  })
+
+  it('returns an empty url when JWT is missing (e.g. logged out)', () => {
+    const localStorageMock = {
+      getItem: vi.fn((key) => (key === 'username' ? 'testuser' : null)),
+    }
+    Object.defineProperty(window, 'localStorage', { value: localStorageMock })
+
+    // url() returns '' when auth is missing; baseUrl('') resolves to '/'.
+    // The point is that no /rest/* request gets constructed.
+    expect(subsonic.getCoverArtUrl({ id: 'a' }, 100)).not.toContain(
+      'getCoverArt',
+    )
+  })
+})
+
 describe('getAvatarUrl', () => {
   beforeEach(() => {
     // Mock localStorage values required by subsonic
@@ -179,8 +214,7 @@ describe('getAvatarUrl', () => {
       getItem: vi.fn((key) => {
         const values = {
           username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
+          token: 'test-jwt-token',
         }
         return values[key] || null
       }),
