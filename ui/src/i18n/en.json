@@ -164,7 +164,8 @@
       },
       "helperTexts": {
         "name": "Changes to your name will only be reflected on next login",
-        "libraries": "Select specific libraries for this user, or leave empty to use default libraries"
+        "libraries": "Select specific libraries for this user, or leave empty to use default libraries",
+        "ldapManagedField": "Managed by LDAP — overwritten on every login"
       },
       "notifications": {
         "created": "User created",
@@ -195,7 +196,7 @@
         "appPasswordOneTime": "Save this secret now — it will not be shown again. Paste it into your Subsonic client in place of your account password.",
         "appPasswordActive": "Active",
         "appPasswordRevoked": "Revoked",
-        "ldapManagedPassword": "This account authenticates against LDAP. Sign in with your directory password and use an app password (below) for Subsonic clients."
+        "ldapManagedPassword": "This account authenticates against LDAP. Sign in with your directory password; for Subsonic clients, generate an app password from the Security page."
       }
     },
     "player": {
@@ -636,6 +637,10 @@
     "settings": "Settings",
     "version": "Version",
     "theme": "Theme",
+    "security": {
+      "name": "Security",
+      "intro": "Manage credentials for this account. App passwords are per-device, revocable, and independent of your account password — paste them into Subsonic-compatible clients in place of your password."
+    },
     "personal": {
       "name": "Personal",
       "options": {
