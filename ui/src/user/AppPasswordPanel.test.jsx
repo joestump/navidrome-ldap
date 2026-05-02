@@ -19,8 +19,8 @@ vi.mock('@material-ui/core/styles', () => ({
     root: '',
     header: '',
     empty: '',
-    secretField: '',
-    secretActions: '',
+    tableWrap: '',
+    secret: '',
   }),
 }))
 
@@ -96,6 +96,7 @@ vi.mock('@material-ui/core', () => {
     Table: passthrough('table', 'MockTable'),
     TableBody: passthrough('tbody', 'MockTableBody'),
     TableCell: passthrough('td', 'MockTableCell'),
+    TableContainer: passthrough('div', 'MockTableContainer'),
     TableHead: passthrough('thead', 'MockTableHead'),
     TableRow: passthrough('tr', 'MockTableRow'),
     Typography: passthrough('div', 'MockTypography'),
@@ -115,11 +116,6 @@ vi.mock('@material-ui/icons/DeleteOutline', () => {
   const MockDeleteOutlineIcon = () => React.createElement('span', null, 'del')
   MockDeleteOutlineIcon.displayName = 'MockDeleteOutlineIcon'
   return { default: MockDeleteOutlineIcon }
-})
-vi.mock('@material-ui/icons/FileCopy', () => {
-  const MockFileCopyIcon = () => React.createElement('span', null, 'cp')
-  MockFileCopyIcon.displayName = 'MockFileCopyIcon'
-  return { default: MockFileCopyIcon }
 })
 
 vi.mock('../consts', () => ({
@@ -191,11 +187,40 @@ describe('<AppPasswordPanel />', () => {
     fireEvent.click(screen.getByTestId('btn-ra.action.create'))
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue('super-secret-123')).toBeInTheDocument()
+      expect(screen.getByText('super-secret-123')).toBeInTheDocument()
     })
   })
 
-  it('calls the revoke endpoint when the per-row revoke button is clicked', async () => {
+  it('copies the secret to the clipboard when the secret element is clicked', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.assign(navigator, { clipboard: { writeText } })
+
+    httpClient
+      .mockResolvedValueOnce({ json: [] })
+      .mockResolvedValueOnce({
+        json: { id: 'ap1', name: 'X', secret: 'click-to-copy-me' },
+      })
+      .mockResolvedValueOnce({ json: [] })
+
+    render(<AppPasswordPanel userId="user-1" />)
+    await waitFor(() => expect(httpClient).toHaveBeenCalledTimes(1))
+
+    fireEvent.click(
+      screen.getByTestId('btn-resources.user.actions.generateAppPassword'),
+    )
+    fireEvent.change(
+      screen.getByTestId('tf-resources.user.fields.appPasswordName'),
+      { target: { value: 'Phone' } },
+    )
+    fireEvent.click(screen.getByTestId('btn-ra.action.create'))
+
+    const secret = await screen.findByText('click-to-copy-me')
+    fireEvent.click(secret)
+
+    expect(writeText).toHaveBeenCalledWith('click-to-copy-me')
+  })
+
+  it('requires confirmation before revoking an app password', async () => {
     httpClient
       .mockResolvedValueOnce({
         json: [
@@ -214,7 +239,14 @@ describe('<AppPasswordPanel />', () => {
     render(<AppPasswordPanel userId="user-1" />)
     await waitFor(() => expect(screen.getByText('iPhone')).toBeInTheDocument())
 
+    // Click the trash icon — should NOT fire DELETE yet, just open the dialog.
     fireEvent.click(screen.getByTestId('icon-button'))
+    expect(httpClient).toHaveBeenCalledTimes(1) // still only the initial load
+
+    // Confirm in the dialog — that's when DELETE actually fires.
+    fireEvent.click(
+      screen.getByTestId('btn-resources.user.actions.revokeAppPassword'),
+    )
 
     await waitFor(() => {
       expect(httpClient).toHaveBeenCalledWith(
@@ -222,5 +254,27 @@ describe('<AppPasswordPanel />', () => {
         { method: 'DELETE' },
       )
     })
+  })
+
+  it('does not revoke when the confirmation dialog is cancelled', async () => {
+    httpClient.mockResolvedValueOnce({
+      json: [
+        {
+          id: 'ap1',
+          name: 'iPhone',
+          createdAt: '2026-04-27T00:00:00Z',
+          lastUsedAt: null,
+          revokedAt: null,
+        },
+      ],
+    })
+
+    render(<AppPasswordPanel userId="user-1" />)
+    await waitFor(() => expect(screen.getByText('iPhone')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByTestId('icon-button'))
+    fireEvent.click(screen.getByTestId('btn-ra.action.cancel'))
+
+    expect(httpClient).toHaveBeenCalledTimes(1) // no DELETE issued
   })
 })

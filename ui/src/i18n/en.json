@@ -196,6 +196,9 @@
         "appPasswordOneTime": "Save this secret now — it will not be shown again. Paste it into your Subsonic client in place of your account password.",
         "appPasswordActive": "Active",
         "appPasswordRevoked": "Revoked",
+        "appPasswordClickToCopy": "Click to copy",
+        "appPasswordConfirmRevokeTitle": "Revoke app password?",
+        "appPasswordConfirmRevokeBody": "Any device or app using \"%{name}\" will stop working immediately. This cannot be undone.",
         "ldapManagedPassword": "This account authenticates against LDAP. Sign in with your directory password; for Subsonic clients, generate an app password from the Security page."
       }
     },
