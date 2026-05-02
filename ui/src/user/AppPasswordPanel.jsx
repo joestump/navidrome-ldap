@@ -12,6 +12,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableContainer,
   TableHead,
   TableRow,
   TextField,
@@ -19,7 +20,6 @@ import {
   Typography,
 } from '@material-ui/core'
 import DeleteOutlineIcon from '@material-ui/icons/DeleteOutline'
-import FileCopyIcon from '@material-ui/icons/FileCopy'
 import { useNotify, useTranslate } from 'react-admin'
 import { makeStyles } from '@material-ui/core/styles'
 import httpClient from '../dataProvider/httpClient'
@@ -30,11 +30,14 @@ const useStyles = makeStyles((theme) => ({
     width: '100%',
     marginTop: theme.spacing(3),
     padding: theme.spacing(2),
+    boxSizing: 'border-box',
   },
   header: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: theme.spacing(1),
     marginBottom: theme.spacing(1),
   },
   empty: {
@@ -42,14 +45,29 @@ const useStyles = makeStyles((theme) => ({
     fontStyle: 'italic',
     padding: theme.spacing(2, 0),
   },
-  secretField: {
-    fontFamily: 'monospace',
+  tableWrap: {
     width: '100%',
+    overflowX: 'auto',
   },
-  secretActions: {
-    display: 'flex',
-    alignItems: 'center',
+  secret: {
+    display: 'block',
+    width: '100%',
     marginTop: theme.spacing(1),
+    padding: theme.spacing(1.5),
+    fontFamily: 'monospace',
+    fontSize: '1rem',
+    textAlign: 'left',
+    wordBreak: 'break-all',
+    backgroundColor: theme.palette.action.hover,
+    border: `1px solid ${theme.palette.divider}`,
+    borderRadius: theme.shape.borderRadius,
+    color: theme.palette.text.primary,
+    cursor: 'pointer',
+    '&:hover, &:focus-visible': {
+      backgroundColor: theme.palette.action.selected,
+      borderColor: theme.palette.primary.main,
+      outline: 'none',
+    },
   },
 }))
 
@@ -68,6 +86,8 @@ export const AppPasswordPanel = ({ userId }) => {
   const [newName, setNewName] = useState('')
   const [creating, setCreating] = useState(false)
   const [generated, setGenerated] = useState(null)
+  const [revokeTarget, setRevokeTarget] = useState(null)
+  const [revoking, setRevoking] = useState(false)
 
   const reload = useCallback(async () => {
     if (!userId) return
@@ -114,15 +134,21 @@ export const AppPasswordPanel = ({ userId }) => {
     }
   }
 
-  const handleRevoke = async (id) => {
+  const handleRevokeConfirmed = async () => {
+    if (!revokeTarget) return
+    setRevoking(true)
     try {
-      await httpClient(`${REST_URL}/user/${userId}/app-password/${id}`, {
-        method: 'DELETE',
-      })
+      await httpClient(
+        `${REST_URL}/user/${userId}/app-password/${revokeTarget.id}`,
+        { method: 'DELETE' },
+      )
       notify('resources.user.notifications.appPasswordRevoked', 'info')
+      setRevokeTarget(null)
       await reload()
     } catch (e) {
       notify('resources.user.notifications.appPasswordRevokeError', 'warning')
+    } finally {
+      setRevoking(false)
     }
   }
 
@@ -130,6 +156,13 @@ export const AppPasswordPanel = ({ userId }) => {
     if (navigator?.clipboard?.writeText) {
       navigator.clipboard.writeText(value)
       notify('resources.user.notifications.appPasswordCopied', 'info')
+    }
+  }
+
+  const handleSecretKeyDown = (value) => (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      handleCopy(value)
     }
   }
 
@@ -157,55 +190,57 @@ export const AppPasswordPanel = ({ userId }) => {
       )}
 
       {items.length > 0 && (
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>
-                {translate('resources.user.fields.appPasswordName')}
-              </TableCell>
-              <TableCell>
-                {translate('resources.user.fields.appPasswordCreatedAt')}
-              </TableCell>
-              <TableCell>
-                {translate('resources.user.fields.appPasswordLastUsedAt')}
-              </TableCell>
-              <TableCell>
-                {translate('resources.user.fields.appPasswordStatus')}
-              </TableCell>
-              <TableCell align="right" />
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {items.map((row) => (
-              <TableRow key={row.id}>
-                <TableCell>{row.name}</TableCell>
-                <TableCell>{formatDate(row.createdAt)}</TableCell>
-                <TableCell>{formatDate(row.lastUsedAt)}</TableCell>
+        <TableContainer className={classes.tableWrap}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
                 <TableCell>
-                  {row.revokedAt
-                    ? translate('resources.user.message.appPasswordRevoked')
-                    : translate('resources.user.message.appPasswordActive')}
+                  {translate('resources.user.fields.appPasswordName')}
                 </TableCell>
-                <TableCell align="right">
-                  {!row.revokedAt && (
-                    <Tooltip
-                      title={translate(
-                        'resources.user.actions.revokeAppPassword',
-                      )}
-                    >
-                      <IconButton
-                        size="small"
-                        onClick={() => handleRevoke(row.id)}
-                      >
-                        <DeleteOutlineIcon fontSize="small" />
-                      </IconButton>
-                    </Tooltip>
-                  )}
+                <TableCell>
+                  {translate('resources.user.fields.appPasswordCreatedAt')}
                 </TableCell>
+                <TableCell>
+                  {translate('resources.user.fields.appPasswordLastUsedAt')}
+                </TableCell>
+                <TableCell>
+                  {translate('resources.user.fields.appPasswordStatus')}
+                </TableCell>
+                <TableCell align="right" />
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {items.map((row) => (
+                <TableRow key={row.id}>
+                  <TableCell>{row.name}</TableCell>
+                  <TableCell>{formatDate(row.createdAt)}</TableCell>
+                  <TableCell>{formatDate(row.lastUsedAt)}</TableCell>
+                  <TableCell>
+                    {row.revokedAt
+                      ? translate('resources.user.message.appPasswordRevoked')
+                      : translate('resources.user.message.appPasswordActive')}
+                  </TableCell>
+                  <TableCell align="right">
+                    {!row.revokedAt && (
+                      <Tooltip
+                        title={translate(
+                          'resources.user.actions.revokeAppPassword',
+                        )}
+                      >
+                        <IconButton
+                          size="small"
+                          onClick={() => setRevokeTarget(row)}
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </TableContainer>
       )}
 
       <Dialog
@@ -252,28 +287,57 @@ export const AppPasswordPanel = ({ userId }) => {
             {translate('resources.user.message.appPasswordOneTime')}
           </DialogContentText>
           {generated && (
-            <>
-              <TextField
-                value={generated.secret}
-                className={classes.secretField}
-                InputProps={{ readOnly: true }}
-                onFocus={(e) => e.target.select()}
-                multiline
-              />
-              <Box className={classes.secretActions}>
-                <Button
-                  startIcon={<FileCopyIcon />}
-                  onClick={() => handleCopy(generated.secret)}
-                >
-                  {translate('resources.user.actions.copyAppPassword')}
-                </Button>
+            <Tooltip
+              title={translate('resources.user.message.appPasswordClickToCopy')}
+              placement="top"
+            >
+              <Box
+                component="div"
+                role="button"
+                tabIndex={0}
+                aria-label={translate(
+                  'resources.user.message.appPasswordClickToCopy',
+                )}
+                className={classes.secret}
+                onClick={() => handleCopy(generated.secret)}
+                onKeyDown={handleSecretKeyDown(generated.secret)}
+              >
+                {generated.secret}
               </Box>
-            </>
+            </Tooltip>
           )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setGenerated(null)} color="primary">
             {translate('ra.action.close')}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={!!revokeTarget}
+        onClose={() => !revoking && setRevokeTarget(null)}
+      >
+        <DialogTitle>
+          {translate('resources.user.message.appPasswordConfirmRevokeTitle')}
+        </DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            {translate('resources.user.message.appPasswordConfirmRevokeBody', {
+              name: revokeTarget?.name || '',
+            })}
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRevokeTarget(null)} disabled={revoking}>
+            {translate('ra.action.cancel')}
+          </Button>
+          <Button
+            onClick={handleRevokeConfirmed}
+            color="secondary"
+            disabled={revoking}
+          >
+            {translate('resources.user.actions.revokeAppPassword')}
           </Button>
         </DialogActions>
       </Dialog>
