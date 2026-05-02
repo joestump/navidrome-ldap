@@ -92,6 +92,14 @@ vi.mock('@material-ui/core', () => ({
   Typography: ({ children }) => <p>{children}</p>,
 }))
 
+vi.mock('@material-ui/lab', () => ({
+  Alert: ({ children, severity }) => (
+    <div role="alert" data-severity={severity}>
+      {children}
+    </div>
+  ),
+}))
+
 describe('<UserEdit />', () => {
   it('should render the user edit form', () => {
     render(<UserEdit id="user1" permissions="admin" />)
@@ -158,12 +166,14 @@ describe('<UserEdit />', () => {
       ).not.toBeInTheDocument()
     })
 
-    it('shows the LDAP-managed-password explainer', () => {
+    it('shows the combined LDAP-managed-account info Alert at the top of the form', () => {
       render(<UserEdit id="user1" permissions="admin" />)
 
-      expect(
-        screen.getByText('resources.user.message.ldapManagedPassword'),
-      ).toBeInTheDocument()
+      const alert = screen.getByRole('alert')
+      expect(alert).toHaveAttribute('data-severity', 'info')
+      expect(alert).toHaveTextContent(
+        'resources.user.message.ldapManagedAccount',
+      )
     })
   })
 
