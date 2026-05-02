@@ -33,8 +33,7 @@ describe('fetchTranscodeDecision', () => {
 
   beforeEach(() => {
     localStorage.setItem('username', 'testuser')
-    localStorage.setItem('subsonic-token', 'testtoken')
-    localStorage.setItem('subsonic-salt', 'testsalt')
+    localStorage.setItem('token', 'test-jwt-token')
 
     httpClient.mockResolvedValue({ json: fakeJson })
   })

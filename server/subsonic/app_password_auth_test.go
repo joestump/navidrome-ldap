@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 
+	"github.com/navidrome/navidrome/core/auth"
 	"github.com/navidrome/navidrome/model"
 	"github.com/navidrome/navidrome/model/request"
 	"github.com/navidrome/navidrome/tests"
@@ -250,6 +251,27 @@ var _ = Describe("App Password Subsonic Auth", func() {
 
 			Expect(nextHandler.called).To(BeFalse())
 			Expect(w.Body.String()).To(ContainSubstring(`code="40"`))
+		})
+
+		// Regression for the bug PR #20 fixes: LDAP users have an empty
+		// stored password, so salt+token over the empty password is
+		// rejected by the LDAP-app-password gate. The web UI uses JWT
+		// (?jwt=) instead — verify it works end-to-end through the
+		// authenticate middleware for an LDAP user with no app password
+		// in play.
+		It("accepts a JWT minted for the LDAP user", func() {
+			auth.Init(ds)
+			ldapUsr, err := ds.User(context.TODO()).FindByUsername(ldapUser)
+			Expect(err).ToNot(HaveOccurred())
+			jwt, err := auth.CreateToken(ldapUsr)
+			Expect(err).ToNot(HaveOccurred())
+
+			r := newGetRequest("u="+ldapUser, "jwt="+jwt)
+			authenticate(ds)(nextHandler).ServeHTTP(w, r)
+
+			Expect(nextHandler.called).To(BeTrue())
+			user, _ := request.UserFrom(nextHandler.req.Context())
+			Expect(user.UserName).To(Equal(ldapUser))
 		})
 	})
 
