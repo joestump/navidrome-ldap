@@ -419,6 +419,7 @@ func Load(noConfigDump bool) {
 		validateScanSchedule,
 		validateBackupSchedule,
 		validateLDAPLivenessSchedule,
+		validateLDAPAdminFilter,
 		validatePlaylistsPath,
 		validatePurgeMissingOption,
 		validateMaxImageUploadSize,
@@ -682,6 +683,19 @@ func validateLDAPLivenessSchedule() error {
 	var err error
 	Server.LDAP.LivenessSchedule, err = validateSchedule(Server.LDAP.LivenessSchedule, "LDAP.LivenessSchedule")
 	return err
+}
+
+// validateLDAPAdminFilter refuses to start when LDAP.AdminFilter is
+// configured but missing the `%s` placeholder. Without it, fmt.Sprintf
+// silently produces a malformed filter (e.g.
+// `(memberOf=cn=admins,...)%!(EXTRA string=alice)`) which only surfaces
+// at runtime as repeated "LDAP admin lookup failed" warnings — the kind
+// of silent breakage that's better caught at startup.
+func validateLDAPAdminFilter() error {
+	if af := Server.LDAP.AdminFilter; af != "" && !strings.Contains(af, "%s") {
+		return fmt.Errorf("ND_LDAP_ADMINFILTER must contain %%s placeholder for the username")
+	}
+	return nil
 }
 
 func validateBackupSchedule() error {

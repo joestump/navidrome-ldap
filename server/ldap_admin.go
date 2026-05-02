@@ -5,6 +5,7 @@ import (
 
 	"github.com/go-ldap/ldap"
 	"github.com/navidrome/navidrome/conf"
+	"github.com/navidrome/navidrome/model"
 )
 
 // adminCheckEnabled reports whether the operator has configured an
@@ -55,4 +56,16 @@ func ldapAdminCheck(l *ldap.Conn, userName string) (isAdmin bool, err error) {
 		return false, err
 	}
 	return len(sr.Entries) > 0, nil
+}
+
+// applyLDAPAdminResult applies the outcome of an admin-membership lookup
+// to the user's IsAdmin flag. A nil result means the lookup was skipped
+// (admin policy not configured) or failed transiently — in both cases
+// the existing IsAdmin is preserved so a directory hiccup can't lock the
+// operator out. A non-nil pointer is the authoritative result and
+// overwrites IsAdmin in either direction (promote or demote).
+func applyLDAPAdminResult(u *model.User, adminCheckResult *bool) {
+	if adminCheckResult != nil {
+		u.IsAdmin = *adminCheckResult
+	}
 }

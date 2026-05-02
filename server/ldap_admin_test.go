@@ -2,6 +2,7 @@ package server
 
 import (
 	"github.com/navidrome/navidrome/conf"
+	"github.com/navidrome/navidrome/model"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -92,6 +93,39 @@ var _ = Describe("LDAP admin filter construction", func() {
 			conf.Server.LDAP.AdminFilter = "(uid=%s)"
 
 			Expect(buildAdminFilter("alice")).To(ContainSubstring("memberOf=cn=admins"))
+		})
+	})
+
+	Describe("applyLDAPAdminResult", func() {
+		It("preserves IsAdmin when result is nil (lookup skipped or transient error)", func() {
+			adminUser := &model.User{IsAdmin: true}
+			applyLDAPAdminResult(adminUser, nil)
+			Expect(adminUser.IsAdmin).To(BeTrue())
+
+			regularUser := &model.User{IsAdmin: false}
+			applyLDAPAdminResult(regularUser, nil)
+			Expect(regularUser.IsAdmin).To(BeFalse())
+		})
+
+		It("promotes the user when result points to true", func() {
+			u := &model.User{IsAdmin: false}
+			result := true
+			applyLDAPAdminResult(u, &result)
+			Expect(u.IsAdmin).To(BeTrue())
+		})
+
+		It("demotes the user when result points to false", func() {
+			u := &model.User{IsAdmin: true}
+			result := false
+			applyLDAPAdminResult(u, &result)
+			Expect(u.IsAdmin).To(BeFalse())
+		})
+
+		It("is a no-op when the result matches the existing value", func() {
+			u := &model.User{IsAdmin: true}
+			result := true
+			applyLDAPAdminResult(u, &result)
+			Expect(u.IsAdmin).To(BeTrue())
 		})
 	})
 })

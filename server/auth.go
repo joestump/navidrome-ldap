@@ -269,9 +269,7 @@ func validateLoginLDAP(userRepo model.UserRepository, userName, password string)
 	u.Name = entry.GetAttributeValue(nameAttr)
 	u.Email = entry.GetAttributeValue(mailAttr)
 	u.AuthType = model.AuthTypeLDAP
-	if adminCheckResult != nil {
-		u.IsAdmin = *adminCheckResult
-	}
+	applyLDAPAdminResult(u, adminCheckResult)
 	if err := userRepo.Put(u); err != nil {
 		log.Error("Could not save LDAP user", "user", userName, err)
 		return nil, nil
