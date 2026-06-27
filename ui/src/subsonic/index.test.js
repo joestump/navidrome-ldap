@@ -235,8 +235,7 @@ describe('reportPlayback', () => {
       getItem: vi.fn((key) => {
         const values = {
           username: 'testuser',
-          'subsonic-token': 'testtoken',
-          'subsonic-salt': 'testsalt',
+          token: 'test-jwt-token',
         }
         return values[key] || null
       }),
