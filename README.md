@@ -5,6 +5,9 @@
 > [!WARNING]
 > **Notice of AI/LLM usage in code.** While I am a reasonably competent Go programmer, I do not have the time nor desire to dig into this codebase deeply.
 > As such, I use [Claude Code](https://claude.com/claude-code) to handle the heavy lifting — including rebasing this fork against upstream Navidrome. I review all code prior to merging into the main branch.
+> The features added by this fork live in the following commits:
+> - [LDAP authentication support](https://github.com/joestump/navidrome-ldap/commit/95c2c4254e3d9678c352ee3c6bb145d2b93f6ad1)
+> - [Per-device app passwords for Subsonic API](https://github.com/joestump/navidrome-ldap/commit/53ae7818aeee47281c3b9d059b739dacbef4175e)
 
 <a href="https://www.navidrome.org"><img src="resources/logo-192x192.png" alt="Navidrome logo" title="navidrome" align="right" height="60px" /></a>
 
