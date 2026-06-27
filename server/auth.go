@@ -16,6 +16,7 @@ import (
 
 	"github.com/deluan/rest"
 	"github.com/go-chi/jwtauth/v5"
+	"github.com/go-ldap/ldap"
 	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/consts"
 	"github.com/navidrome/navidrome/core/auth"
@@ -47,7 +48,7 @@ func login(ds model.DataStore) func(w http.ResponseWriter, r *http.Request) {
 }
 
 func doLogin(ds model.DataStore, username string, password string, w http.ResponseWriter, r *http.Request) {
-	user, err := validateLogin(ds.User(r.Context()), username, password)
+	user, err := ValidateLogin(ds.User(r.Context()), username, password)
 	if err != nil {
 		_ = rest.RespondWithError(w, http.StatusInternalServerError, "Unknown error authentication user. Please try again")
 		return
@@ -152,13 +153,30 @@ func createAdminUser(ctx context.Context, ds model.DataStore, username, password
 	return nil
 }
 
-func validateLogin(userRepo model.UserRepository, userName, password string) (*model.User, error) {
-	u, err := userRepo.FindByUsernameWithPassword(userName)
+func ValidateLogin(userRepo model.UserRepository, userName, password string) (*model.User, error) {
+	// Empty passwords never authenticate. LDAP-backed users have an empty
+	// `password` column (cleared by ClearPassword on every login), so an
+	// empty submitted password would otherwise match the empty stored one
+	// in the local fallback below.
+	if password == "" {
+		return nil, nil
+	}
+	u, err := validateLoginLDAP(userRepo, userName, password)
+	if u != nil && err == nil {
+		return u, nil
+	}
+	u, err = userRepo.FindByUsernameWithPassword(userName)
 	if errors.Is(err, model.ErrNotFound) {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, err
+	}
+	// LDAP-backed users have no valid local password. If we reached this
+	// point for one (LDAP unreachable, directory bind failed, etc.), refuse
+	// rather than fall through to the local-password compare.
+	if u.IsLDAP() || u.Password == "" {
+		return nil, nil
 	}
 	if u.Password != password {
 		return nil, nil
@@ -167,6 +185,110 @@ func validateLogin(userRepo model.UserRepository, userName, password string) (*m
 	if err != nil {
 		log.Error("Could not update LastLoginAt", "user", userName)
 	}
+	return u, nil
+}
+
+func validateLoginLDAP(userRepo model.UserRepository, userName, password string) (*model.User, error) {
+	if conf.Server.LDAP.Host == "" {
+		return nil, nil
+	}
+
+	bindDN := conf.Server.LDAP.BindDN
+	bindPassword := conf.Server.LDAP.BindPassword
+	mailAttr := conf.Server.LDAP.Mail
+	nameAttr := conf.Server.LDAP.Name
+
+	l, err := ldap.DialURL(conf.Server.LDAP.Host)
+	if err != nil {
+		log.Error("LDAP connection failed", "host", conf.Server.LDAP.Host, err)
+		return nil, nil
+	}
+	defer l.Close()
+
+	// Bind with the read-only service account to search for the user
+	if err := l.Bind(bindDN, bindPassword); err != nil {
+		log.Error("LDAP service-account bind failed", "bindDN", bindDN, err)
+		return nil, nil
+	}
+
+	searchRequest := ldap.NewSearchRequest(
+		conf.Server.LDAP.Base,
+		ldap.ScopeWholeSubtree, ldap.NeverDerefAliases, 0, 0, false,
+		fmt.Sprintf(conf.Server.LDAP.SearchFilter, ldap.EscapeFilter(userName)),
+		[]string{"dn", nameAttr, mailAttr},
+		nil,
+	)
+	sr, err := l.Search(searchRequest)
+	if err != nil {
+		log.Error("LDAP search failed", "user", userName, err)
+		return nil, nil
+	}
+	if len(sr.Entries) != 1 {
+		log.Warn("LDAP search returned unexpected number of entries", "user", userName, "matches", len(sr.Entries))
+		return nil, nil
+	}
+
+	entry := sr.Entries[0]
+
+	// Admin-group check (if configured). Run BEFORE the user-bind, while
+	// the connection is still authenticated as the service account —
+	// l.Bind below will replace that with the user's bind, which on many
+	// directories cannot read group memberships. The result is only
+	// applied after the user-bind succeeds.
+	var adminCheckResult *bool
+	if adminCheckEnabled() {
+		isAdmin, adminErr := ldapAdminCheck(l, userName)
+		if adminErr != nil {
+			// Transient lookup failure — preserve the existing IsAdmin
+			// to avoid locking the operator out from a directory hiccup.
+			log.Warn("LDAP admin lookup failed; preserving existing IsAdmin", "user", userName, adminErr)
+		} else {
+			adminCheckResult = &isAdmin
+		}
+	}
+
+	// Re-bind as the user to verify their password
+	if err := l.Bind(entry.DN, password); err != nil {
+		log.Warn("LDAP user authentication failed", "user", userName, err)
+		return nil, nil
+	}
+
+	// User authenticated. Sync the directory-sourced attributes to the
+	// local DB but DO NOT persist the directory password. LDAP-backed users
+	// authenticate against the directory on every web login; for the
+	// Subsonic API they must use an app password (which is independent and
+	// revocable).
+	u, err := userRepo.FindByUsername(userName)
+	if errors.Is(err, model.ErrNotFound) {
+		u = &model.User{UserName: userName}
+	} else if err != nil {
+		log.Error("Could not look up LDAP user in DB", "user", userName, err)
+		return nil, nil
+	}
+	u.Name = entry.GetAttributeValue(nameAttr)
+	u.Email = entry.GetAttributeValue(mailAttr)
+	u.AuthType = model.AuthTypeLDAP
+	applyLDAPAdminResult(u, adminCheckResult)
+	if err := userRepo.Put(u); err != nil {
+		log.Error("Could not save LDAP user", "user", userName, err)
+		return nil, nil
+	}
+	// Clear any password that may have been persisted by a previous version
+	// of this code (or by the user being promoted from local → LDAP). This
+	// is the migration path for existing LDAP users post-upgrade: their
+	// first login here scrubs the old reversibly-encrypted directory
+	// password from the DB.
+	if err := userRepo.ClearPassword(u.ID); err != nil {
+		log.Error("Could not clear persisted password for LDAP user", "user", userName, err)
+	}
+	// Mirror the DB scrub in memory so callers (notably buildAuthPayload's
+	// subsonicToken hash) don't compute over a stale ciphertext loaded by
+	// FindByUsername above.
+	u.Password = ""
+	if err := userRepo.UpdateLastLoginAt(u.ID); err != nil {
+		log.Error("Could not update LastLoginAt", "user", userName, err)
+	}
+
 	return u, nil
 }
 

@@ -235,6 +235,41 @@ var _ = Describe("Configuration", func() {
 		)
 	})
 
+	Describe("ValidateLDAPAdminFilter", func() {
+		BeforeEach(func() {
+			viper.Reset()
+			conf.SetViperDefaults()
+			viper.SetDefault("datafolder", GinkgoT().TempDir())
+			viper.SetDefault("loglevel", "error")
+			conf.ResetConf()
+		})
+
+		It("accepts an empty AdminFilter (feature off)", func() {
+			conf.Server.LDAP.AdminFilter = ""
+			Expect(conf.ValidateLDAPAdminFilter()).To(Succeed())
+		})
+
+		It("accepts an AdminFilter that contains %s", func() {
+			conf.Server.LDAP.AdminFilter = "(&(memberOf=cn=admins,dc=example,dc=org)(uid=%s))"
+			Expect(conf.ValidateLDAPAdminFilter()).To(Succeed())
+		})
+
+		It("rejects a non-empty AdminFilter that is missing %s", func() {
+			conf.Server.LDAP.AdminFilter = "(memberOf=cn=admins,dc=example,dc=org)"
+			err := conf.ValidateLDAPAdminFilter()
+			Expect(err).To(HaveOccurred())
+			Expect(err.Error()).To(ContainSubstring("ND_LDAP_ADMINFILTER"))
+			Expect(err.Error()).To(ContainSubstring("%s"))
+		})
+
+		It("fails Load when AdminFilter is missing %s", func() {
+			viper.Set("ldap.adminfilter", "(memberOf=cn=admins,dc=example,dc=org)")
+			Expect(func() {
+				conf.Load(true)
+			}).To(PanicWith(ContainSubstring("ND_LDAP_ADMINFILTER")))
+		})
+	})
+
 	Describe("EnforceNonRootUser", func() {
 		It("defaults to false", func() {
 			conf.Load(true)

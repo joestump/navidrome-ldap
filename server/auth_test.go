@@ -342,4 +342,106 @@ var _ = Describe("Auth", func() {
 			Expect(u.IsAdmin).To(BeFalse())
 		})
 	})
+
+	Describe("LDAP Login", func() {
+		var ds model.DataStore
+		var originalHost string
+
+		BeforeEach(func() {
+			ds = &tests.MockDataStore{}
+			originalHost = conf.Server.LDAP.Host
+		})
+
+		AfterEach(func() {
+			conf.Server.LDAP.Host = originalHost
+		})
+
+		It("validateLoginLDAP returns nil if Host is not configured", func() {
+			conf.Server.LDAP.Host = ""
+			u, err := validateLoginLDAP(ds.User(context.Background()), "user", "pass")
+			Expect(err).To(BeNil())
+			Expect(u).To(BeNil())
+		})
+
+		It("validateLoginLDAP returns nil if connection fails", func() {
+			conf.Server.LDAP.Host = "ldap://invalid-host:389"
+			u, err := validateLoginLDAP(ds.User(context.Background()), "user", "pass")
+			Expect(err).To(BeNil())
+			Expect(u).To(BeNil())
+		})
+
+		It("ValidateLogin proceeds to DB auth if LDAP is not configured", func() {
+			conf.Server.LDAP.Host = ""
+			userRepo := ds.User(context.Background())
+			_ = userRepo.Put(&model.User{ID: "1", UserName: "user", NewPassword: "password", Name: "User"})
+
+			u, err := ValidateLogin(userRepo, "user", "password")
+			Expect(err).To(BeNil())
+			Expect(u).ToNot(BeNil())
+			Expect(u.UserName).To(Equal("user"))
+		})
+
+		It("ValidateLogin proceeds to DB auth if LDAP fails", func() {
+			conf.Server.LDAP.Host = "ldap://invalid-host:389"
+			userRepo := ds.User(context.Background())
+			_ = userRepo.Put(&model.User{ID: "1", UserName: "user", NewPassword: "password", Name: "User"})
+
+			u, err := ValidateLogin(userRepo, "user", "password")
+			Expect(err).To(BeNil())
+			Expect(u).ToNot(BeNil())
+			Expect(u.UserName).To(Equal("user"))
+		})
+
+		// Defense-in-depth against the empty-password authentication bypass.
+		// LDAP users have an empty `password` column (cleared by
+		// ClearPassword on every login), so without these guards the local
+		// fallback could accept an empty supplied password as a match
+		// against the empty stored value during any LDAP outage.
+		Context("empty-password floor", func() {
+			It("rejects an empty password outright", func() {
+				conf.Server.LDAP.Host = ""
+				userRepo := ds.User(context.Background())
+				_ = userRepo.Put(&model.User{ID: "1", UserName: "user", NewPassword: "password", Name: "User"})
+
+				u, err := ValidateLogin(userRepo, "user", "")
+				Expect(err).To(BeNil())
+				Expect(u).To(BeNil())
+			})
+
+			It("rejects an LDAP-backed user via local fallback when LDAP is down", func() {
+				conf.Server.LDAP.Host = "ldap://invalid-host:389"
+				userRepo := ds.User(context.Background())
+				_ = userRepo.Put(&model.User{
+					ID:       "ldap-1",
+					UserName: "ldapper",
+					Name:     "Ldapper",
+					AuthType: model.AuthTypeLDAP,
+				})
+				_ = userRepo.ClearPassword("ldap-1")
+
+				u, err := ValidateLogin(userRepo, "ldapper", "")
+				Expect(err).To(BeNil())
+				Expect(u).To(BeNil())
+
+				u, err = ValidateLogin(userRepo, "ldapper", "any-non-empty-password")
+				Expect(err).To(BeNil())
+				Expect(u).To(BeNil())
+			})
+
+			It("rejects when the stored password is empty (mid-migration row)", func() {
+				conf.Server.LDAP.Host = ""
+				userRepo := ds.User(context.Background())
+				_ = userRepo.Put(&model.User{
+					ID:       "stale-1",
+					UserName: "staleuser",
+					Name:     "Stale",
+				})
+				_ = userRepo.ClearPassword("stale-1")
+
+				u, err := ValidateLogin(userRepo, "staleuser", "anything")
+				Expect(err).To(BeNil())
+				Expect(u).To(BeNil())
+			})
+		})
+	})
 })

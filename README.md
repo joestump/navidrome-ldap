@@ -1,3 +1,11 @@
+> [!IMPORTANT]
+> This is a soft fork of Navidrome that adds LDAP support. It is based on [this previously closed PR](https://github.com/navidrome/navidrome/pull/590).
+> Based on the thread in the original PR, it is unlikely this would be accepted upstream, but I wanted to use LLDAP with Navidrome so here we are. 
+
+> [!WARNING]
+> **Notice of AI/LLM usage in code.** While I am a reasonably competent Go programmer, I do not have the time nor desire to dig into this codebase deeply.
+> As such, I use [Claude Code](https://claude.com/claude-code) to handle the heavy lifting — including rebasing this fork against upstream Navidrome. I review all code prior to merging into the main branch.
+
 <a href="https://www.navidrome.org"><img src="resources/logo-192x192.png" alt="Navidrome logo" title="navidrome" align="right" height="60px" /></a>
 
 # Navidrome Music Server &nbsp;[![Tweet](https://img.shields.io/twitter/url/http/shields.io.svg?style=social)](https://twitter.com/intent/tweet?text=Tired%20of%20paying%20for%20music%20subscriptions%2C%20and%20not%20finding%20what%20you%20really%20like%3F%20Roll%20your%20own%20streaming%20service%21&url=https://navidrome.org&via=navidrome)
@@ -48,6 +56,7 @@ A share of the revenue helps fund the development of Navidrome at no additional 
  - Reads and uses all your beautifully curated **metadata**
  - Great support for **compilations** (Various Artists albums) and **box sets** (multi-disc albums)
  - **Multi-user**, each user has their own play counts, playlists, favourites, etc...
+ - **LDAP** support allows users to authenticate against LDAP servers for SSO
  - Very **low resource usage**
  - **Multi-platform**, runs on macOS, Linux and Windows. **Docker** images are also provided
  - Ready to use binaries for all major platforms, including **Raspberry Pi**
@@ -57,6 +66,68 @@ A share of the revenue helps fund the development of Navidrome at no additional 
  - **Compatible** with all Subsonic/Madsonic/Airsonic [clients](https://www.navidrome.org/docs/overview/#apps)
  - **Transcoding** on the fly. Can be set per user/player. **Opus encoding is supported**
  - Translated to **various languages**
+
+## LDAP Support
+
+> [!WARNING]
+> LDAP support is currently unofficial and NOT supported by the Navidrome team. Please use at your own risk.
+
+Navidrome supports LDAP authentication, allowing you to integrate with your existing directory services. When a user logs in via LDAP, their account is automatically created in Navidrome if it doesn't exist and is marked as LDAP-backed (`auth_type='ldap'`).
+
+LDAP-backed users do **not** have their directory password persisted in Navidrome's database. The web UI authenticates each login against the directory; for Subsonic-API clients (Tempus, Feishin, etc.) the user must generate one or more **app passwords** from the user-edit page and paste those into their client. App passwords are per-device, revocable, and independent of the directory password — so you can revoke a stolen client without rotating your LDAP password, and rotating your LDAP password doesn't break working clients.
+
+### Upgrading from earlier versions
+
+If you ran an earlier version of `navidrome-ldap` that persisted the directory password to the user table:
+
+- On their next **web login** post-upgrade, each LDAP user is migrated automatically: `auth_type` is set to `ldap` and any persisted password is cleared.
+- Until that first login, existing Subsonic clients continue to authenticate with the persisted password (as before).
+- After migration, Subsonic clients must use an app password. Each user can generate one from their user-edit page (Settings → App Passwords).
+- The migration is one-way per user. Operators who want to flush all persisted passwords up front can have each user log in once, or run a database command to mark all users as LDAP and clear passwords manually.
+
+### Liveness check
+
+When `ND_LDAP_LIVENESSSCHEDULE` is set, Navidrome runs a recurring sweep that reconciles every LDAP-backed user against the directory. If a user has been removed from the directory (or matches the optional `ND_LDAP_DISABLEDFILTER` clause), the sweep revokes all of that user's app passwords. Combined with PR #11's empty stored password, this is the lockout mechanism for LDAP-managed accounts: revoking the app passwords removes the only credential they had for the Subsonic API, and they can no longer log in to the web UI either (LDAP rejects them, and there is no local password to fall back on).
+
+The sweep is fail-safe: if the directory is unreachable or the service-account bind fails, the run is aborted without revoking anything. Per-user search errors log a warning and skip just that user.
+
+The interval is the lockout window operators are accepting — pick something that matches the urgency of your offboarding policy. The default is disabled (no sweep).
+
+### Admin role from LDAP
+
+When `ND_LDAP_ADMINGROUP` (or the more flexible `ND_LDAP_ADMINFILTER`) is set, Navidrome treats the directory as the source of truth for admin membership. On every LDAP login *and* on every liveness-check tick, the user's admin status is recomputed: members of the configured group become admins, non-members are demoted. A failed admin lookup never demotes — the previous value is preserved so a transient directory hiccup can't lock the operator out.
+
+> [!IMPORTANT]
+> Add your existing Navidrome admin to the configured admin group **before** enabling this feature, otherwise the next login will demote them.
+
+> [!WARNING]
+> **Demotion does not revoke library access.** Upstream Navidrome auto-grants every library to a user when they're saved with `IsAdmin == true`, but there is no symmetric revoke when admin is removed. After a demotion (whether at login or on a liveness tick), the user keeps their `user_library` rows and therefore retains access to every library the admin shortcut had silently materialized for them. The fork does not auto-clean these rows because they have no provenance metadata — operator-assigned grants and admin-auto-grants are indistinguishable, and a blanket reset would destroy explicit assignments.
+>
+> When you remove a user from the LDAP admin group (or expect a sweep tick to do it), review their library access manually in the user-edit screen and prune any rows the user shouldn't keep.
+
+### Docker Container
+
+To use LDAP features, you must use [the fork's Docker image](https://github.com/joestump/navidrome-ldap/pkgs/container/navidrome-ldap):
+
+`ghcr.io/joestump/navidrome-ldap:develop`
+
+### Configuration
+
+You can configure LDAP using the following environment variables:
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `ND_LDAP_HOST` | The LDAP server URL | `ldap://localhost:389` |
+| `ND_LDAP_BINDDN` | The DN used to bind for searching users | `cn=admin,dc=example,dc=org` |
+| `ND_LDAP_BINDPASSWORD` | The password for the Bind DN | `admin_password` |
+| `ND_LDAP_BASE` | The base DN for user search | `ou=users,dc=example,dc=org` |
+| `ND_LDAP_SEARCHFILTER` | The filter to search for users. `%s` is replaced by the username | `(uid=%s)` |
+| `ND_LDAP_NAME` | The LDAP attribute to map to the user's full name | `cn` |
+| `ND_LDAP_MAIL` | The LDAP attribute to map to the user's email | `mail` |
+| `ND_LDAP_LIVENESSSCHEDULE` | How often the liveness sweep runs. Accepts a duration (`5m`, `1h`) or a full crontab. Empty disables the sweep. | `15m` |
+| `ND_LDAP_DISABLEDFILTER` | Optional LDAP filter ANDed with `SearchFilter` to flag disabled entries. The filter applies to the user's own attributes — it does not take a `%s`. | `(loginShell=/sbin/nologin)` |
+| `ND_LDAP_ADMINGROUP` | DN of an LDAP group whose members should be Navidrome admins. When set, IsAdmin is recomputed against the directory on every login + liveness sweep. | `cn=nd-admins,ou=groups,dc=example,dc=org` |
+| `ND_LDAP_ADMINFILTER` | Alternative to `AdminGroup` for directories that don't expose `memberOf`. MUST contain `%s` for the username. | `(&(memberOf=cn=nd-admins,...)(uid=%s))` |
 
 ## Translations
 

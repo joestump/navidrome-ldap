@@ -16,6 +16,8 @@ var ToPascalCase = toPascalCase
 
 var ValidateMaxImageUploadSize = validateMaxImageUploadSize
 
+var ValidateLDAPAdminFilter = validateLDAPAdminFilter
+
 func SetRuntimeInfoForTest(goos string, euid int) func() {
 	oldGOOS := currentGOOS
 	oldEUID := getEUID
