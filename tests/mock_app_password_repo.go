@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/navidrome/navidrome/model"
-	"github.com/navidrome/navidrome/utils/gg"
 )
 
 func CreateMockAppPasswordRepo() *MockedAppPasswordRepo {
@@ -107,7 +106,8 @@ func (m *MockedAppPasswordRepo) Revoke(id string) error {
 	if ap.RevokedAt != nil {
 		return model.ErrNotFound
 	}
-	ap.RevokedAt = gg.P(time.Now())
+	now := time.Now()
+		ap.RevokedAt = &now
 	return nil
 }
 
@@ -120,7 +120,8 @@ func (m *MockedAppPasswordRepo) RevokeAllForUser(userID string) (int64, error) {
 	var n int64
 	for _, ap := range m.Data {
 		if ap.UserID == userID && ap.RevokedAt == nil {
-			ap.RevokedAt = gg.P(time.Now())
+			now := time.Now()
+		ap.RevokedAt = &now
 			n++
 		}
 	}
@@ -141,6 +142,7 @@ func (m *MockedAppPasswordRepo) Touch(id string) error {
 		// Mirror the real repo: don't bump last_used_at on revoked rows.
 		return nil
 	}
-	ap.LastUsedAt = gg.P(time.Now())
+	now := time.Now()
+		ap.LastUsedAt = &now
 	return nil
 }
