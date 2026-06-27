@@ -122,11 +122,56 @@ func authenticate(ds model.DataStore) func(next http.Handler) http.Handler {
 				p := req.Params(r)
 				username, _ := p.String("u")
 				pass, _ := p.String("p")
+				if strings.HasPrefix(pass, "enc:") {
+					if dec, err := hex.DecodeString(pass[4:]); err == nil {
+						pass = string(dec)
+					}
+				}
 				token, _ := p.String("t")
 				salt, _ := p.String("s")
 				jwt, _ := p.String("jwt")
 
-				usr, err = ds.User(ctx).FindByUsernameWithPassword(username)
+				// App-password fast path. When the request carries a `p` or
+				// salt+token, try matching against the user's active app
+				// passwords FIRST. This avoids hitting LDAP on every Subsonic
+				// request from a client using an app password — which is the
+				// whole point of decoupling Subsonic auth from the directory.
+				// LDAP deployments with lockout policies (AD lockoutThreshold,
+				// FreeIPA password policy) would otherwise lock the user's
+				// directory account on every legitimate app-password request.
+				//
+				// We also use this lookup to enforce the LDAP-no-direct-password
+				// policy: an LDAP-backed user MUST authenticate with an app
+				// password — their directory password is no longer accepted at
+				// /rest, even via legacy `p=` or salt+token, since it would
+				// otherwise still be checkable via the LDAP bind in
+				// `ValidateLogin` and persist the directory password problem.
+				if jwt == "" && (pass != "" || token != "") {
+					lookupUsr, appID, ok := matchAppPassword(ctx, ds, username, pass, token, salt)
+					if ok {
+						if touchErr := ds.AppPassword(ctx).Touch(appID); touchErr != nil {
+							log.Warn(ctx, "API: Failed to bump app password last_used_at", "id", appID, "username", username, touchErr)
+						}
+						ctx = request.WithUser(ctx, *lookupUsr)
+						next.ServeHTTP(w, r.WithContext(ctx))
+						return
+					}
+					if lookupUsr != nil && lookupUsr.IsLDAP() {
+						log.Warn(ctx, "API: Rejecting non-app-password Subsonic auth for LDAP user", "username", username, "remoteAddr", r.RemoteAddr)
+						sendError(w, r, newError(responses.ErrorAuthenticationFail))
+						return
+					}
+				}
+
+				if pass != "" {
+					usr, err = server.ValidateLogin(ds.User(ctx), username, pass)
+					if err == nil && usr == nil {
+						err = model.ErrNotFound
+					}
+				} else {
+					usr, err = ds.User(ctx).FindByUsernameWithPassword(username)
+				}
+
 				if errors.Is(err, context.Canceled) {
 					log.Debug(ctx, "API: Request canceled when authenticating", "auth", "subsonic", "username", username, "remoteAddr", r.RemoteAddr, err)
 					return
@@ -137,9 +182,11 @@ func authenticate(ds model.DataStore) func(next http.Handler) http.Handler {
 				case err != nil:
 					log.Error(ctx, "API: Error authenticating username", "auth", "subsonic", "username", username, "remoteAddr", r.RemoteAddr, err)
 				default:
-					err = validateCredentials(usr, pass, token, salt, jwt)
-					if err != nil {
-						log.Warn(ctx, "API: Invalid login", "auth", "subsonic", "username", username, "remoteAddr", r.RemoteAddr, err)
+					if pass == "" {
+						err = validateCredentials(usr, pass, token, salt, jwt)
+						if err != nil {
+							log.Warn(ctx, "API: Invalid login", "auth", "subsonic", "username", username, "remoteAddr", r.RemoteAddr, err)
+						}
 					}
 				}
 			}
@@ -185,8 +232,14 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 				pass = string(dec)
 			}
 		}
-		valid = pass == user.Password
+		// Empty stored password (LDAP users post-ClearPassword, mid-migration
+		// rows, etc.) must never be a valid credential — the comparison
+		// `"" == ""` would otherwise succeed.
+		valid = pass != "" && user.Password != "" && pass == user.Password
 	case token != "":
+		if user.Password == "" {
+			break
+		}
 		t := fmt.Sprintf("%x", md5.Sum([]byte(user.Password+salt)))
 		valid = t == token
 	}
@@ -195,6 +248,40 @@ func validateCredentials(user *model.User, pass, token, salt, jwt string) error 
 		return model.ErrInvalidAuth
 	}
 	return nil
+}
+
+// matchAppPassword tries to authenticate the request against the user's
+// active app passwords. Returns:
+//   - (user, appID, true)  on a match
+//   - (user, "",   false)  when the user exists but no app password matched
+//     (so the caller can decide whether to fall through or reject — the
+//     LDAP-user-must-use-app-password gate uses this case)
+//   - (nil,  "",   false)  when the user doesn't exist or lookup failed
+//
+// `pass` MUST already be the decoded plaintext (the parent `authenticate`
+// flow handles `enc:` decoding once); we do not decode again.
+func matchAppPassword(ctx context.Context, ds model.DataStore, username, pass, token, salt string) (*model.User, string, bool) {
+	if username == "" {
+		return nil, "", false
+	}
+	usr, err := ds.User(ctx).FindByUsername(username)
+	if err != nil {
+		return nil, "", false
+	}
+	active, err := ds.AppPassword(ctx).FindActiveByUser(usr.ID)
+	if err != nil {
+		log.Warn(ctx, "API: Error loading app passwords", "username", username, err)
+		return usr, "", false
+	}
+	for _, ap := range active {
+		switch {
+		case pass != "" && pass == ap.Password:
+			return usr, ap.ID, true
+		case token != "" && fmt.Sprintf("%x", md5.Sum([]byte(ap.Password+salt))) == token:
+			return usr, ap.ID, true
+		}
+	}
+	return usr, "", false
 }
 
 func getPlayer(players core.Players) func(next http.Handler) http.Handler {
