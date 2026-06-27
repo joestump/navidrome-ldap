@@ -13,6 +13,7 @@ import ViewListIcon from '@material-ui/icons/ViewList'
 import { Dialogs } from '../dialogs/Dialogs'
 import { AboutDialog } from '../dialogs'
 import PersonalMenu from './PersonalMenu'
+import SecurityMenu from './SecurityMenu'
 import ActivityPanel from './ActivityPanel'
 import NowPlayingPanel from './NowPlayingPanel'
 import UserMenu from './UserMenu'
@@ -128,6 +129,7 @@ const CustomUserMenu = ({ onClick, ...rest }) => {
         <PersonalMenu sidebarIsOpen={true} onClick={onClick} />
         <Divider />
         {renderUserMenuItemLink()}
+        <SecurityMenu sidebarIsOpen={true} onClick={onClick} />
         {resources
           .filter(settingsResources)
           .map((r) => renderSettingsMenuItemLink(r))}
