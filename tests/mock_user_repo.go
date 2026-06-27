@@ -112,6 +112,20 @@ func (u *MockedUserRepo) UpdateLastAccessAt(id string) error {
 	return u.Error
 }
 
+func (u *MockedUserRepo) ClearPassword(id string) error {
+	if u.Error != nil {
+		return u.Error
+	}
+	for _, usr := range u.Data {
+		if usr.ID == id {
+			usr.Password = ""
+			usr.NewPassword = ""
+			return nil
+		}
+	}
+	return model.ErrNotFound
+}
+
 // Library association methods - mock implementations
 
 func (u *MockedUserRepo) GetUserLibraries(userID string) (model.Libraries, error) {
@@ -174,5 +188,10 @@ func (u *MockedUserRepo) Update(id string, entity any, cols ...string) error {
 	}
 	usr := entity.(*model.User)
 	usr.ID = id
+	// Mirror userRepository.Update: auth_type is preserved from the
+	// existing row, never taken from the incoming payload.
+	if existing, err := u.Get(id); err == nil {
+		usr.AuthType = existing.AuthType
+	}
 	return u.Put(usr)
 }
