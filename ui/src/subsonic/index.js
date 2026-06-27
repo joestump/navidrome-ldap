@@ -7,16 +7,21 @@ import {
 
 const url = (command, id, options) => {
   const username = localStorage.getItem('username')
-  const token = localStorage.getItem('subsonic-token')
-  const salt = localStorage.getItem('subsonic-salt')
-  if (!username || !token || !salt) {
+  const jwt = localStorage.getItem('token')
+  if (!username || !jwt) {
     return ''
   }
 
+  // Authenticate /rest/* via the JWT minted by /auth/login. The legacy
+  // salt+token path (md5(user.Password + salt)) doesn't work for
+  // LDAP-backed users — they have an empty stored password by design,
+  // so the token resolves to md5(salt) which the server-side gate
+  // correctly rejects as forgeable. JWT is server-signed, bound to the
+  // user via Subject claim, and validated by the existing JWT arm of
+  // validateCredentials — same auth surface for local and LDAP users.
   const params = new URLSearchParams()
   params.append('u', username)
-  params.append('t', token)
-  params.append('s', salt)
+  params.append('jwt', jwt)
   params.append('f', 'json')
   params.append('v', '1.8.0')
   params.append('c', 'NavidromeUI')
