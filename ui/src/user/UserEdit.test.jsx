@@ -35,6 +35,10 @@ const hooks = vi.hoisted(() => ({
   refresh: vi.fn(),
 }))
 
+// Hoisted state lets us swap formData per-test (vi.mock factories are
+// hoisted before imports, so we can't close over a regular variable).
+const mocks = vi.hoisted(() => ({ formData: {} }))
+
 // Mock React-Admin completely with simpler implementations
 vi.mock('react-admin', () => ({
   Edit: ({ children, title }) => (
@@ -59,7 +63,7 @@ vi.mock('react-admin', () => ({
   ),
   Toolbar: ({ children }) => <div data-testid="toolbar">{children}</div>,
   SaveButton: () => <button data-testid="save-button">Save</button>,
-  FormDataConsumer: ({ children }) => children({ formData: {} }),
+  FormDataConsumer: ({ children }) => children({ formData: mocks.formData }),
   Typography: ({ children }) => <p>{children}</p>,
   required: () => () => null,
   email: () => () => null,
@@ -73,6 +77,10 @@ vi.mock('react-admin', () => ({
 
 vi.mock('./LibrarySelectionField.jsx', () => ({
   LibrarySelectionField: () => <div data-testid="library-selection-field" />,
+}))
+
+vi.mock('./AppPasswordPanel.jsx', () => ({
+  AppPasswordPanel: () => <div data-testid="app-password-panel" />,
 }))
 
 vi.mock('./DeleteUserButton', () => ({
@@ -91,6 +99,14 @@ vi.mock('@material-ui/core/styles', () => ({
 
 vi.mock('@material-ui/core', () => ({
   Typography: ({ children }) => <p>{children}</p>,
+}))
+
+vi.mock('@material-ui/lab', () => ({
+  Alert: ({ children, severity }) => (
+    <div role="alert" data-severity={severity}>
+      {children}
+    </div>
+  ),
 }))
 
 describe('<UserEdit />', () => {
@@ -196,6 +212,56 @@ describe('<UserEdit />', () => {
 
       expect(hooks.notify).toHaveBeenCalledWith('ra.page.error', 'warning')
       expect(hooks.redirect).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('LDAP-backed user', () => {
+    beforeEach(() => {
+      mocks.formData = { authType: 'ldap' }
+    })
+    afterEach(() => {
+      mocks.formData = {}
+    })
+
+    it('hides the changePassword toggle and password inputs', () => {
+      render(<UserEdit id="user1" permissions="admin" />)
+
+      expect(
+        screen.queryByTestId('boolean-input-changePassword'),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByTestId('password-input-currentPassword'),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByTestId('password-input-password'),
+      ).not.toBeInTheDocument()
+    })
+
+    it('shows the combined LDAP-managed-account info Alert at the top of the form', () => {
+      render(<UserEdit id="user1" permissions="admin" />)
+
+      const alert = screen.getByRole('alert')
+      expect(alert).toHaveAttribute('data-severity', 'info')
+      expect(alert).toHaveTextContent(
+        'resources.user.message.ldapManagedAccount',
+      )
+    })
+  })
+
+  describe('local user', () => {
+    beforeEach(() => {
+      mocks.formData = { authType: 'local' }
+    })
+    afterEach(() => {
+      mocks.formData = {}
+    })
+
+    it('shows the changePassword toggle', () => {
+      render(<UserEdit id="user1" permissions="admin" />)
+
+      expect(
+        screen.getByTestId('boolean-input-changePassword'),
+      ).toBeInTheDocument()
     })
   })
 })
