@@ -21,17 +21,22 @@ import {
   useRecordContext,
 } from 'react-admin'
 import { Typography } from '@material-ui/core'
+import { Alert } from '@material-ui/lab'
 import { Title } from '../common'
 import DeleteUserButton from './DeleteUserButton'
 import { LibrarySelectionField } from './LibrarySelectionField.jsx'
 import { validateUserForm } from './userValidation'
 
-const useStyles = makeStyles({
+const useStyles = makeStyles((theme) => ({
   toolbar: {
     display: 'flex',
     justifyContent: 'space-between',
   },
-})
+  ldapAlert: {
+    marginTop: theme.spacing(1),
+    marginBottom: theme.spacing(2),
+  },
+}))
 
 const UserTitle = ({ record }) => {
   const translate = useTranslate()
@@ -74,11 +79,11 @@ const UserEdit = (props) => {
   const refresh = useRefresh()
 
   const isMyself = props.id === localStorage.getItem('userId')
-  const getNameHelperText = () =>
-    isMyself && {
-      helperText: translate('resources.user.helperTexts.name'),
-    }
   const canDelete = permissions === 'admin' && !isMyself
+  const classes = useStyles()
+  const nameHelperText = isMyself
+    ? translate('resources.user.helperTexts.name')
+    : undefined
 
   const save = useCallback(
     async (values) => {
@@ -117,33 +122,60 @@ const UserEdit = (props) => {
         save={save}
         validate={validateForm}
       >
-        {permissions === 'admin' && (
-          <TextInput
-            spellCheck={false}
-            source="userName"
-            validate={[required()]}
-          />
-        )}
-        <TextInput
-          source="name"
-          validate={[required()]}
-          {...getNameHelperText()}
-        />
-        <TextInput spellCheck={false} source="email" validate={[email()]} />
-        <BooleanInput source="changePassword" />
         <FormDataConsumer>
-          {(formDataProps) => (
-            <CurrentPasswordInput
-              spellCheck={false}
-              isMyself={isMyself}
-              {...formDataProps}
-            />
-          )}
+          {({ formData }) => {
+            const ldap = formData.authType === 'ldap'
+            // For LDAP-backed users the directory is the source of
+            // truth — userName, name, and password live there, so
+            // editing them locally is at best transient. One Alert at
+            // the top of the form explains the whole shape; userName
+            // and name are rendered disabled (admins still see the
+            // field, but can't change it) and the password block is
+            // omitted entirely.
+            return (
+              <>
+                {ldap && (
+                  <Alert
+                    severity="info"
+                    variant="outlined"
+                    className={classes.ldapAlert}
+                  >
+                    {translate('resources.user.message.ldapManagedAccount')}
+                  </Alert>
+                )}
+                {permissions === 'admin' && (
+                  <TextInput
+                    spellCheck={false}
+                    source="userName"
+                    validate={[required()]}
+                    disabled={ldap}
+                  />
+                )}
+                <TextInput
+                  source="name"
+                  validate={[required()]}
+                  disabled={ldap}
+                  helperText={ldap ? undefined : nameHelperText}
+                />
+              </>
+            )
+          }}
         </FormDataConsumer>
+        <TextInput spellCheck={false} source="email" validate={[email()]} />
         <FormDataConsumer>
-          {(formDataProps) => (
-            <NewPasswordInput spellCheck={false} {...formDataProps} />
-          )}
+          {({ formData }) =>
+            formData.authType === 'ldap' ? null : (
+              <>
+                <BooleanInput source="changePassword" />
+                <CurrentPasswordInput
+                  spellCheck={false}
+                  isMyself={isMyself}
+                  formData={formData}
+                />
+                <NewPasswordInput spellCheck={false} formData={formData} />
+              </>
+            )
+          }
         </FormDataConsumer>
 
         {permissions === 'admin' && (
