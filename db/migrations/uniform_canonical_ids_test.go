@@ -59,6 +59,7 @@ var _ = Describe("upUniformCanonicalIds", func() {
 			CREATE TABLE scrobble_buffer (id text, user_id text, media_file_id text);
 			CREATE TABLE playqueue (id text, user_id text, items text);
 			CREATE TABLE user_library (user_id text, library_id integer);
+			CREATE TABLE user_app_password (id text, user_id text);
 			CREATE TABLE scrobbles (id integer, media_file_id text, user_id text);
 			CREATE TABLE media_file_artists (media_file_id text, artist_id text);
 			CREATE TABLE album_artists (album_id text, artist_id text);

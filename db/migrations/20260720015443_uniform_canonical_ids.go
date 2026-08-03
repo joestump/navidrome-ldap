@@ -74,6 +74,7 @@ var idColumns = []struct{ table, col string }{
 	{"playqueue", "id"}, {"playqueue", "user_id"},
 	{"user_library", "user_id"},
 	{"scrobbles", "user_id"}, {"scrobbles", "media_file_id"},
+	{"user_app_password", "id"}, {"user_app_password", "user_id"},
 	{"media_file_artists", "media_file_id"}, {"media_file_artists", "artist_id"},
 	{"album_artists", "album_id"}, {"album_artists", "artist_id"},
 	{"library_tag", "tag_id"},
