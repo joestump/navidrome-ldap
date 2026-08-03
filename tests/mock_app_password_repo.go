@@ -107,7 +107,7 @@ func (m *MockedAppPasswordRepo) Revoke(id string) error {
 		return model.ErrNotFound
 	}
 	now := time.Now()
-		ap.RevokedAt = &now
+	ap.RevokedAt = &now
 	return nil
 }
 
@@ -121,7 +121,7 @@ func (m *MockedAppPasswordRepo) RevokeAllForUser(userID string) (int64, error) {
 	for _, ap := range m.Data {
 		if ap.UserID == userID && ap.RevokedAt == nil {
 			now := time.Now()
-		ap.RevokedAt = &now
+			ap.RevokedAt = &now
 			n++
 		}
 	}
@@ -143,6 +143,6 @@ func (m *MockedAppPasswordRepo) Touch(id string) error {
 		return nil
 	}
 	now := time.Now()
-		ap.LastUsedAt = &now
+	ap.LastUsedAt = &now
 	return nil
 }
