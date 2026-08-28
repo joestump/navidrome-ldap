@@ -407,6 +407,31 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Guard for #28: the manifest is assembled from whatever digest artifacts
+      # happen to be present, and imagetools create accepts any number of them.
+      # A run that lost digests therefore published a truncated image and still
+      # went green. Downloading them a second time WITHOUT merge-multiple keeps
+      # one directory per artifact, so the platforms that actually contributed
+      # are checkable by name -- deterministic, and no registry read involved
+      # (tag reads can serve a stale manifest for minutes after a push).
+      - name: Download digests (unmerged, for verification)
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digest-names
+          pattern: digests-*
+
+      - name: Verify every required platform contributed a digest
+        run: |
+          ls -1 /tmp/digest-names
+          missing=""
+          for want in linux_amd64 linux_arm64; do
+            [ -d "/tmp/digest-names/digests-$want" ] || missing="$missing $(printf %s "$want" | tr _ /)"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Digest set is missing:$missing -- refusing to publish a truncated manifest. See #28."
+            exit 1
+          fi
+
       - name: Create manifest list and push to ghcr.io
         working-directory: /tmp/digests
         run: |
@@ -416,6 +441,7 @@ jobs:
       - name: Inspect image in ghcr.io
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.docker.outputs.version }}
+
 
   push-manifest-dockerhub:
     name: Push to Docker Hub
@@ -444,6 +470,31 @@ jobs:
           hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
           hub_password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
+      # Guard for #28: the manifest is assembled from whatever digest artifacts
+      # happen to be present, and imagetools create accepts any number of them.
+      # A run that lost digests therefore published a truncated image and still
+      # went green. Downloading them a second time WITHOUT merge-multiple keeps
+      # one directory per artifact, so the platforms that actually contributed
+      # are checkable by name -- deterministic, and no registry read involved
+      # (tag reads can serve a stale manifest for minutes after a push).
+      - name: Download digests (unmerged, for verification)
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digest-names
+          pattern: digests-*
+
+      - name: Verify every required platform contributed a digest
+        run: |
+          ls -1 /tmp/digest-names
+          missing=""
+          for want in linux_amd64 linux_arm64; do
+            [ -d "/tmp/digest-names/digests-$want" ] || missing="$missing $(printf %s "$want" | tr _ /)"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Digest set is missing:$missing -- refusing to publish a truncated manifest. See #28."
+            exit 1
+          fi
+
       - name: Create manifest list and push to Docker Hub
         uses: nick-fields/retry@v4
         with:
@@ -459,6 +510,7 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ vars.DOCKER_HUB_REPO }}:${{ steps.docker.outputs.version }}
 
+
   cleanup-digests:
     name: Cleanup digest artifacts
     runs-on: ubuntu-latest
@@ -469,7 +521,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for artifact in $(gh api repos/${{ github.repository }}/actions/artifacts | jq -r '.artifacts[] | select(.name | startswith("digests-")) | .id'); do
+          # Scope this to the CURRENT run. Listing artifacts repo-wide deletes the
+          # in-flight digests of every other concurrent run, silently truncating
+          # their manifests -- this is what dropped amd64 from v0.63.2 (#28).
+          for artifact in $(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq -r '.artifacts[] | select(.name | startswith("digests-")) | .id'); do
             gh api --method DELETE repos/${{ github.repository }}/actions/artifacts/$artifact
           done
 
