@@ -407,6 +407,31 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
+      # Guard for #28: the manifest is assembled from whatever digest artifacts
+      # happen to be present, and imagetools create accepts any number of them.
+      # A run that lost digests therefore published a truncated image and still
+      # went green. Downloading them a second time WITHOUT merge-multiple keeps
+      # one directory per artifact, so the platforms that actually contributed
+      # are checkable by name -- deterministic, and no registry read involved
+      # (tag reads can serve a stale manifest for minutes after a push).
+      - name: Download digests (unmerged, for verification)
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digest-names
+          pattern: digests-*
+
+      - name: Verify every required platform contributed a digest
+        run: |
+          ls -1 /tmp/digest-names
+          missing=""
+          for want in linux_amd64 linux_arm64; do
+            [ -d "/tmp/digest-names/digests-$want" ] || missing="$missing $(printf %s "$want" | tr _ /)"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Digest set is missing:$missing -- refusing to publish a truncated manifest. See #28."
+            exit 1
+          fi
+
       - name: Create manifest list and push to ghcr.io
         working-directory: /tmp/digests
         run: |
@@ -417,30 +442,6 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.docker.outputs.version }}
 
-      - name: Verify required platforms are in the manifest
-        run: |
-          # A truncated digest set still produces a "successful" manifest, so assert
-          # the platforms we actually ship are present before calling this a release (#28).
-          #
-          # Retry: a registry can serve a stale tag manifest for a few seconds after
-          # a push (read-after-write lag), which is not a truncated build. Only a
-          # miss that persists past the window is a real failure.
-          missing=""
-          for attempt in $(seq 1 8); do
-            inspect=$(docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.docker.outputs.version }} 2>/dev/null || true)
-            missing=""
-            for want in linux/amd64 linux/arm64; do
-              printf '%s\n' "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
-            done
-            [ -z "$missing" ] && break
-            echo "attempt $attempt: missing$missing - retrying in 15s"
-            sleep 15
-          done
-          printf '%s\n' "$inspect"
-          if [ -n "$missing" ]; then
-            echo "::error::ghcr.io manifest is missing:$missing -- refusing to publish a truncated image. See #28."
-            exit 1
-          fi
 
   push-manifest-dockerhub:
     name: Push to Docker Hub
@@ -469,6 +470,31 @@ jobs:
           hub_username: ${{ secrets.DOCKER_HUB_USERNAME }}
           hub_password: ${{ secrets.DOCKER_HUB_PASSWORD }}
 
+      # Guard for #28: the manifest is assembled from whatever digest artifacts
+      # happen to be present, and imagetools create accepts any number of them.
+      # A run that lost digests therefore published a truncated image and still
+      # went green. Downloading them a second time WITHOUT merge-multiple keeps
+      # one directory per artifact, so the platforms that actually contributed
+      # are checkable by name -- deterministic, and no registry read involved
+      # (tag reads can serve a stale manifest for minutes after a push).
+      - name: Download digests (unmerged, for verification)
+        uses: actions/download-artifact@v8
+        with:
+          path: /tmp/digest-names
+          pattern: digests-*
+
+      - name: Verify every required platform contributed a digest
+        run: |
+          ls -1 /tmp/digest-names
+          missing=""
+          for want in linux_amd64 linux_arm64; do
+            [ -d "/tmp/digest-names/digests-$want" ] || missing="$missing $(printf %s "$want" | tr _ /)"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Digest set is missing:$missing -- refusing to publish a truncated manifest. See #28."
+            exit 1
+          fi
+
       - name: Create manifest list and push to Docker Hub
         uses: nick-fields/retry@v4
         with:
@@ -484,30 +510,6 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ vars.DOCKER_HUB_REPO }}:${{ steps.docker.outputs.version }}
 
-      - name: Verify required platforms are in the manifest
-        run: |
-          # A truncated digest set still produces a "successful" manifest, so assert
-          # the platforms we actually ship are present before calling this a release (#28).
-          #
-          # Retry: a registry can serve a stale tag manifest for a few seconds after
-          # a push (read-after-write lag), which is not a truncated build. Only a
-          # miss that persists past the window is a real failure.
-          missing=""
-          for attempt in $(seq 1 8); do
-            inspect=$(docker buildx imagetools inspect ${{ vars.DOCKER_HUB_REPO }}:${{ steps.docker.outputs.version }} 2>/dev/null || true)
-            missing=""
-            for want in linux/amd64 linux/arm64; do
-              printf '%s\n' "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
-            done
-            [ -z "$missing" ] && break
-            echo "attempt $attempt: missing$missing - retrying in 15s"
-            sleep 15
-          done
-          printf '%s\n' "$inspect"
-          if [ -n "$missing" ]; then
-            echo "::error::Docker Hub manifest is missing:$missing -- refusing to publish a truncated image. See #28."
-            exit 1
-          fi
 
   cleanup-digests:
     name: Cleanup digest artifacts
