@@ -187,8 +187,6 @@ describe('<UserEdit />', () => {
         { smart_count: 1 },
       )
     })
-
-
   })
 
   describe('LDAP-backed user', () => {
