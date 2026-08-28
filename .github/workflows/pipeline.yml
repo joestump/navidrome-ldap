@@ -417,6 +417,21 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.docker.outputs.version }}
 
+      - name: Verify required platforms are in the manifest
+        run: |
+          # A truncated digest set still produces a "successful" manifest, so assert
+          # the platforms we actually ship are present before calling this a release (#28).
+          inspect=$(docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.docker.outputs.version }})
+          echo "$inspect"
+          missing=""
+          for want in linux/amd64 linux/arm64; do
+            echo "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::ghcr.io manifest is missing:$missing -- refusing to publish a truncated image. See #28."
+            exit 1
+          fi
+
   push-manifest-dockerhub:
     name: Push to Docker Hub
     runs-on: ubuntu-latest
@@ -459,6 +474,21 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ vars.DOCKER_HUB_REPO }}:${{ steps.docker.outputs.version }}
 
+      - name: Verify required platforms are in the manifest
+        run: |
+          # A truncated digest set still produces a "successful" manifest, so assert
+          # the platforms we actually ship are present before calling this a release (#28).
+          inspect=$(docker buildx imagetools inspect ${{ vars.DOCKER_HUB_REPO }}:${{ steps.docker.outputs.version }})
+          echo "$inspect"
+          missing=""
+          for want in linux/amd64 linux/arm64; do
+            echo "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Docker Hub manifest is missing:$missing -- refusing to publish a truncated image. See #28."
+            exit 1
+          fi
+
   cleanup-digests:
     name: Cleanup digest artifacts
     runs-on: ubuntu-latest
@@ -469,7 +499,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          for artifact in $(gh api repos/${{ github.repository }}/actions/artifacts | jq -r '.artifacts[] | select(.name | startswith("digests-")) | .id'); do
+          # Scope this to the CURRENT run. Listing artifacts repo-wide deletes the
+          # in-flight digests of every other concurrent run, silently truncating
+          # their manifests -- this is what dropped amd64 from v0.63.2 (#28).
+          for artifact in $(gh api repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts | jq -r '.artifacts[] | select(.name | startswith("digests-")) | .id'); do
             gh api --method DELETE repos/${{ github.repository }}/actions/artifacts/$artifact
           done
 
