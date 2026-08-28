@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 
+	"github.com/navidrome/navidrome/conf"
 	"github.com/navidrome/navidrome/conf/configtest"
 	"github.com/navidrome/navidrome/core/auth"
 	"github.com/navidrome/navidrome/model"
@@ -24,6 +25,7 @@ var _ = Describe("App Password API", func() {
 
 	BeforeEach(func() {
 		DeferCleanup(configtest.SetupConfig())
+		conf.Server.EnableSharing = false
 		ds = &tests.MockDataStore{}
 		auth.Init(ds)
 		nativeRouter := New(ds, nil, nil, nil, tests.NewMockLibraryService(), tests.NewMockUserService(), nil, nil, nil)

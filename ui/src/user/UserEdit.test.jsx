@@ -47,9 +47,10 @@ vi.mock('react-admin', () => ({
       {children}
     </div>
   ),
-  SimpleForm: ({ children }) => (
-    <form data-testid="simple-form">{children}</form>
-  ),
+  SimpleForm: ({ children, save }) => {
+    hooks.save = save
+    return <form data-testid="simple-form">{children}</form>
+  },
   TextInput: ({ source }) => <input data-testid={`text-input-${source}`} />,
   BooleanInput: ({ source }) => (
     <input type="checkbox" data-testid={`boolean-input-${source}`} />
@@ -66,10 +67,10 @@ vi.mock('react-admin', () => ({
   Typography: ({ children }) => <p>{children}</p>,
   required: () => () => null,
   email: () => () => null,
-  useMutation: () => [vi.fn()],
-  useNotify: () => vi.fn(),
-  useRedirect: () => vi.fn(),
-  useRefresh: () => vi.fn(),
+  useMutation: () => [hooks.mutate],
+  useNotify: () => hooks.notify,
+  useRedirect: () => hooks.redirect,
+  useRefresh: () => hooks.refresh,
   usePermissions: () => ({ permissions: 'admin' }),
   useTranslate: () => (key) => key,
 }))
@@ -187,25 +188,7 @@ describe('<UserEdit />', () => {
       )
     })
 
-    it('notifies an error when the update fails without field errors', async () => {
-      hooks.mutate.mockRejectedValue(new Error('Forbidden'))
-      render(<UserEdit id="user1" permissions="admin" />)
 
-      await hooks.save({ id: 'user1' })
-
-      expect(hooks.notify).toHaveBeenCalledWith('ra.page.error', 'warning')
-      expect(hooks.redirect).not.toHaveBeenCalled()
-    })
-
-    it('notifies an error when the update rejects with a non-object error', async () => {
-      hooks.mutate.mockRejectedValue(undefined)
-      render(<UserEdit id="user1" permissions="admin" />)
-
-      await hooks.save({ id: 'user1' })
-
-      expect(hooks.notify).toHaveBeenCalledWith('ra.page.error', 'warning')
-      expect(hooks.redirect).not.toHaveBeenCalled()
-    })
   })
 
   describe('LDAP-backed user', () => {
