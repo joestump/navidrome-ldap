@@ -79,7 +79,20 @@ runs:
         images: |
           name=${{env.DOCKER_HUB_REPO}},enable=${{env.DOCKER_HUB_ENABLED}}
           name=ghcr.io/${{ github.repository }}
+        # `latest` must follow the FORK's releases, not upstream's.
+        #
+        # metadata-action defaults to flavor `latest=auto`, which tags latest on
+        # any clean semver tag. A `-ldap` tag is a semver PRERELEASE, so it could
+        # never win latest -- while a bare upstream version tag pushed into this
+        # fork could, and did: `latest` spent weeks pointing at an image built
+        # from upstream Navidrome with none of the fork's LDAP code in it (#28).
+        #
+        # So: turn the automatic behaviour off, and tag latest explicitly for
+        # -ldap releases only.
+        flavor: |
+          latest=false
         tags: |
           type=ref,event=pr
           type=semver,pattern={{version}}
           type=raw,value=develop,enable={{is_default_branch}}
+          type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/') && endsWith(github.ref, '-ldap') }}
