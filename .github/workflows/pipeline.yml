@@ -421,12 +421,22 @@ jobs:
         run: |
           # A truncated digest set still produces a "successful" manifest, so assert
           # the platforms we actually ship are present before calling this a release (#28).
-          inspect=$(docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.docker.outputs.version }})
-          echo "$inspect"
+          #
+          # Retry: a registry can serve a stale tag manifest for a few seconds after
+          # a push (read-after-write lag), which is not a truncated build. Only a
+          # miss that persists past the window is a real failure.
           missing=""
-          for want in linux/amd64 linux/arm64; do
-            echo "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
+          for attempt in $(seq 1 8); do
+            inspect=$(docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.docker.outputs.version }} 2>/dev/null || true)
+            missing=""
+            for want in linux/amd64 linux/arm64; do
+              printf '%s\n' "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
+            done
+            [ -z "$missing" ] && break
+            echo "attempt $attempt: missing$missing - retrying in 15s"
+            sleep 15
           done
+          printf '%s\n' "$inspect"
           if [ -n "$missing" ]; then
             echo "::error::ghcr.io manifest is missing:$missing -- refusing to publish a truncated image. See #28."
             exit 1
@@ -478,12 +488,22 @@ jobs:
         run: |
           # A truncated digest set still produces a "successful" manifest, so assert
           # the platforms we actually ship are present before calling this a release (#28).
-          inspect=$(docker buildx imagetools inspect ${{ vars.DOCKER_HUB_REPO }}:${{ steps.docker.outputs.version }})
-          echo "$inspect"
+          #
+          # Retry: a registry can serve a stale tag manifest for a few seconds after
+          # a push (read-after-write lag), which is not a truncated build. Only a
+          # miss that persists past the window is a real failure.
           missing=""
-          for want in linux/amd64 linux/arm64; do
-            echo "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
+          for attempt in $(seq 1 8); do
+            inspect=$(docker buildx imagetools inspect ${{ vars.DOCKER_HUB_REPO }}:${{ steps.docker.outputs.version }} 2>/dev/null || true)
+            missing=""
+            for want in linux/amd64 linux/arm64; do
+              printf '%s\n' "$inspect" | grep -q "^ *Platform: *$want$" || missing="$missing $want"
+            done
+            [ -z "$missing" ] && break
+            echo "attempt $attempt: missing$missing - retrying in 15s"
+            sleep 15
           done
+          printf '%s\n' "$inspect"
           if [ -n "$missing" ]; then
             echo "::error::Docker Hub manifest is missing:$missing -- refusing to publish a truncated image. See #28."
             exit 1
